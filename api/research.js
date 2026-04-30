@@ -1,18 +1,18 @@
 const https = require('https');
+const crypto = require('crypto');
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   POLYGON.IO DATA LAYER
+   CONFIG & HELPERS
    ═══════════════════════════════════════════════════════════════════════════ */
 
-const POLYGON_KEY = process.env.POLYGON_API_KEY || '';
+const POLYGON_KEY  = process.env.POLYGON_API_KEY  || '';
 const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY || '';
-const POLYGON_BASE = 'https://api.polygon.io';
 
 function polygonGet(path) {
   const sep = path.includes('?') ? '&' : '?';
-  const url = `${POLYGON_BASE}${path}${sep}apiKey=${POLYGON_KEY}`;
+  const url = `https://api.polygon.io${path}${sep}apiKey=${POLYGON_KEY}`;
   return new Promise((resolve, reject) => {
-    https.get(url, { headers: { 'User-Agent': 'TFG-Research/1.0' } }, (res) => {
+    https.get(url, { headers: { 'User-Agent': 'TFG-Research/3.0' } }, (res) => {
       let body = '';
       res.on('data', d => body += d);
       res.on('end', () => {
@@ -20,107 +20,102 @@ function polygonGet(path) {
           const parsed = JSON.parse(body);
           if (parsed.status === 'ERROR' || parsed.error) {
             reject(new Error(parsed.error || parsed.message || `Polygon error on ${path}`));
-          } else {
-            resolve(parsed);
-          }
-        } catch (e) {
-          reject(new Error(`Failed to parse Polygon response for ${path}`));
-        }
+          } else { resolve(parsed); }
+        } catch (e) { reject(new Error(`Parse error on ${path}`)); }
       });
       res.on('error', reject);
     }).on('error', reject);
   });
 }
 
-function anthropicPost(payload) {
+function httpsPost(options, payload) {
   return new Promise((resolve, reject) => {
-    const data = JSON.stringify(payload);
-    const req = https.request({
-      hostname: 'api.anthropic.com',
-      path: '/v1/messages',
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': ANTHROPIC_KEY,
-        'anthropic-version': '2023-06-01',
-        'Content-Length': Buffer.byteLength(data)
-      }
-    }, (res) => {
-      let body = '';
-      res.on('data', d => body += d);
-      res.on('end', () => {
-        try { resolve({ status: res.statusCode, body: JSON.parse(body) }); }
-        catch (e) { reject(new Error('Failed to parse Anthropic response')); }
-      });
-      res.on('error', reject);
+    const req = https.request(options, (res) => {
+      const chunks = [];
+      res.on('data', c => chunks.push(c));
+      res.on('end', () => resolve({ status: res.statusCode, body: Buffer.concat(chunks).toString('utf8') }));
     });
     req.on('error', reject);
-    req.write(data);
+    req.setTimeout(240000, () => req.destroy(new Error('Request timed out after 240s')));
+    req.write(payload);
     req.end();
   });
 }
 
-/* ── Date helpers ─────────────────────────────────────────────────────── */
 function todayStr() { return new Date().toISOString().slice(0, 10); }
-function yearsAgo(n) {
-  const d = new Date(); d.setFullYear(d.getFullYear() - n);
-  return d.toISOString().slice(0, 10);
-}
+function yearsAgo(n) { const d = new Date(); d.setFullYear(d.getFullYear() - n); return d.toISOString().slice(0, 10); }
 function fmtM(v) { return v != null ? (v / 1e6).toFixed(1) : null; }
 function fmtPct(v) { return v != null ? (v * 100).toFixed(1) : null; }
 function safe(v, dec = 2) { return v != null ? Number(v).toFixed(dec) : null; }
+function generateId() { return crypto.randomBytes(7).toString('base64url').slice(0, 9); }
+
+/* ── KV helpers (Upstash REST — no npm needed) ────────────────────────── */
+async function kvSet(key, value) {
+  const url = process.env.KV_REST_API_URL;
+  const token = process.env.KV_REST_API_TOKEN;
+  if (!url || !token) { console.warn('KV not configured — report will not be saved.'); return false; }
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify(['SET', key, value, 'EX', 7776000]) // 90 day TTL
+    });
+    return res.ok;
+  } catch (e) { console.error('KV SET error:', e.message); return false; }
+}
+
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   FETCH ALL DATA FOR A TICKER
+   POLYGON DATA FETCHING
    ═══════════════════════════════════════════════════════════════════════════ */
 
 async function fetchTickerData(ticker) {
   const T = ticker.toUpperCase();
 
-  // ── 1. Company details ──────────────────────────────────────────────
+  // 1. Company details
   const detailsRes = await polygonGet(`/v3/reference/tickers/${T}`);
   const co = detailsRes.results || {};
 
-  // ── 2. Annual financials (last 6 years) ─────────────────────────────
+  // 2. Annual financials (last 6 years)
   const finRes = await polygonGet(
     `/vX/reference/financials?ticker=${T}&timeframe=annual&order=desc&limit=6&sort=period_of_report_date`
   );
   const filings = (finRes.results || []).reverse(); // oldest first
 
-  // ── 3. Quarterly financials (last 8 quarters for TTM) ───────────────
+  // 3. Quarterly financials (last 8 quarters for TTM)
   const qFinRes = await polygonGet(
     `/vX/reference/financials?ticker=${T}&timeframe=quarterly&order=desc&limit=8&sort=period_of_report_date`
   );
   const quarters = (qFinRes.results || []);
 
-  // ── 4. Price history (6 years of monthly bars for valuation charts) ──
+  // 4. Monthly price bars (6 years, for valuation charts)
   const priceRes = await polygonGet(
     `/v2/aggs/ticker/${T}/range/1/month/${yearsAgo(6)}/${todayStr()}?adjusted=true&sort=asc&limit=100`
   );
   const monthlyBars = (priceRes.results || []);
 
-  // ── 5. Daily bars for annual highs/lows + recent price ──────────────
+  // 5. Daily bars (6 years, for annual highs/lows + recent price)
   const dailyRes = await polygonGet(
     `/v2/aggs/ticker/${T}/range/1/day/${yearsAgo(6)}/${todayStr()}?adjusted=true&sort=asc&limit=2000`
   );
   const dailyBars = (dailyRes.results || []);
 
-  // ── 6. S&P 500 monthly bars (for relative valuation) ────────────────
+  // 6. S&P 500 monthly bars (for relative valuation)
   const spRes = await polygonGet(
     `/v2/aggs/ticker/SPY/range/1/month/${yearsAgo(6)}/${todayStr()}?adjusted=true&sort=asc&limit=100`
   );
   const spyMonthly = (spRes.results || []);
 
-  // ── 7. Dividend history ─────────────────────────────────────────────
+  // 7. Dividend history
   const divRes = await polygonGet(`/v3/reference/dividends?ticker=${T}&order=desc&limit=30`);
   const divs = (divRes.results || []);
 
-  // ── 8. Snapshot (current price, volume) ─────────────────────────────
+  // 8. Snapshot (may require paid plan — graceful fallback)
   let snapshot = null;
   try {
     const snapRes = await polygonGet(`/v2/snapshot/locale/us/markets/stocks/tickers/${T}`);
     snapshot = snapRes.ticker || null;
-  } catch (e) { /* snapshot may require paid plan — fall back to last daily bar */ }
+  } catch (e) { /* fallback to last daily bar */ }
 
   return { co, filings, quarters, monthlyBars, dailyBars, spyMonthly, divs, snapshot, ticker: T };
 }
@@ -133,16 +128,12 @@ async function fetchTickerData(ticker) {
 function computeMetrics(raw) {
   const { co, filings, quarters, monthlyBars, dailyBars, spyMonthly, divs, snapshot, ticker } = raw;
 
-  // ── Recent price ────────────────────────────────────────────────────
+  // Recent price
   let recentPrice = null;
-  if (snapshot && snapshot.day) {
-    recentPrice = snapshot.day.c || snapshot.lastTrade?.p || null;
-  }
-  if (!recentPrice && dailyBars.length > 0) {
-    recentPrice = dailyBars[dailyBars.length - 1].c;
-  }
+  if (snapshot && snapshot.day) recentPrice = snapshot.day.c || snapshot.lastTrade?.p || null;
+  if (!recentPrice && dailyBars.length > 0) recentPrice = dailyBars[dailyBars.length - 1].c;
 
-  // ── Company info ────────────────────────────────────────────────────
+  // Company info
   const companyName = co.name || ticker;
   const marketCap = co.market_cap || null;
   const sicDesc = co.sic_description || '';
@@ -150,23 +141,19 @@ function computeMetrics(raw) {
   const sharesOut = co.share_class_shares_outstanding || co.weighted_shares_outstanding || null;
   const homepage = co.homepage_url || '';
 
-  // ── Process annual financials ───────────────────────────────────────
+  // Process annual financials
   const annuals = filings.map(f => {
     const ic = f.financials?.income_statement || {};
     const bs = f.financials?.balance_sheet || {};
     const cf = f.financials?.cash_flow_statement || {};
-    const period = f.fiscal_period || '';
     const year = f.fiscal_year || (f.end_date || '').slice(0, 4);
-    const so = ic.basic_average_shares?.value || bs.equity_attributable_to_parent?.value ? null : null;
-    const shares = f.financials?.income_statement?.basic_average_shares?.value || sharesOut;
+    const shares = ic.basic_average_shares?.value || sharesOut;
 
     const revenue = ic.revenues?.value || null;
     const netIncome = ic.net_income_loss?.value || null;
     const opIncome = ic.operating_income_loss?.value || null;
-    const grossProfit = ic.gross_profit?.value || null;
     const eps = ic.basic_earnings_per_share?.value || (netIncome && shares ? netIncome / shares : null);
 
-    const totalAssets = bs.assets?.value || null;
     const totalEquity = bs.equity_attributable_to_parent?.value || null;
     const ltDebt = bs.long_term_debt?.value || bs.noncurrent_liabilities?.value || null;
     const currentAssets = bs.current_assets?.value || null;
@@ -175,20 +162,17 @@ function computeMetrics(raw) {
     const bookVal = totalEquity && shares ? totalEquity / shares : null;
 
     const opCF = cf.net_cash_flow_from_operating_activities?.value || null;
-    const capex = cf.net_cash_flow_from_investing_activities?.value || null; // typically negative
-    const actualCapex = capex ? Math.abs(capex) : null; // approximate — polygon doesn't split capex cleanly
-    const fcf = opCF != null ? opCF - (actualCapex || 0) : null;
+    const capexRaw = cf.net_cash_flow_from_investing_activities?.value || null;
+    const capex = capexRaw ? Math.abs(capexRaw) : null;
+    const fcf = opCF != null ? opCF - (capex || 0) : null;
 
-    // EBITDA approximation: operating income + D&A
     const da = ic.depreciation_and_amortization?.value || cf.depreciation_amortization_and_accretion?.value || 0;
     const ebitda = opIncome != null ? opIncome + Math.abs(da) : null;
 
     return {
-      year,
-      revenue, netIncome, opIncome, grossProfit, ebitda,
-      eps, shares,
+      year, revenue, netIncome, opIncome, ebitda, eps, shares,
       totalEquity, ltDebt, currentAssets, currentLiab, workingCap, bookVal,
-      opCF, capex: actualCapex, fcf,
+      opCF, capex, fcf,
       ebitdaMargin: revenue && ebitda ? ebitda / revenue : null,
       opMargin: revenue && opIncome ? opIncome / revenue : null,
       netMargin: revenue && netIncome ? netIncome / revenue : null,
@@ -197,7 +181,7 @@ function computeMetrics(raw) {
     };
   });
 
-  // ── TTM from quarters ───────────────────────────────────────────────
+  // TTM from quarters
   const ttmQ = quarters.slice(0, 4);
   let ttmRevenue = 0, ttmNetIncome = 0, ttmEBITDA = 0, ttmFCF = 0;
   ttmQ.forEach(q => {
@@ -215,14 +199,15 @@ function computeMetrics(raw) {
 
   const ttmEPS = sharesOut && ttmNetIncome ? ttmNetIncome / sharesOut : null;
 
-  // ── Valuation ratios ────────────────────────────────────────────────
+  // Valuation ratios
   const trailingPE = recentPrice && ttmEPS && ttmEPS > 0 ? recentPrice / ttmEPS : null;
-  const ev = marketCap && annuals.length > 0 ?
-    marketCap + (annuals[annuals.length - 1].ltDebt || 0) - (annuals[annuals.length - 1].currentAssets || 0) * 0.3 : null;
+  const ev = marketCap && annuals.length > 0
+    ? marketCap + (annuals[annuals.length - 1].ltDebt || 0) - (annuals[annuals.length - 1].currentAssets || 0) * 0.3
+    : null;
   const evEbitdaTTM = ev && ttmEBITDA > 0 ? ev / ttmEBITDA : null;
   const priceFCF = marketCap && ttmFCF > 0 ? marketCap / ttmFCF : null;
 
-  // ── Annual price ranges from daily bars ─────────────────────────────
+  // Annual price ranges
   const priceRanges = {};
   dailyBars.forEach(bar => {
     const yr = new Date(bar.t).getFullYear().toString();
@@ -231,19 +216,18 @@ function computeMetrics(raw) {
     if (bar.l < priceRanges[yr].low) priceRanges[yr].low = bar.l;
   });
 
-  // ── Monthly closing prices for valuation chart ──────────────────────
+  // Monthly closing prices
   const monthlyPrices = monthlyBars.map(b => ({
     date: new Date(b.t).toISOString().slice(0, 7),
     label: new Date(b.t).toLocaleDateString('en-US', { month: 'short', year: '2-digit' }),
     close: b.c
   }));
-
   const spyPrices = spyMonthly.map(b => ({
     date: new Date(b.t).toISOString().slice(0, 7),
     close: b.c
   }));
 
-  // ── Dividends ───────────────────────────────────────────────────────
+  // Dividends
   const annualDivs = {};
   divs.forEach(d => {
     const yr = (d.pay_date || d.ex_dividend_date || '').slice(0, 4);
@@ -253,76 +237,58 @@ function computeMetrics(raw) {
   const divYield = recentPrice && ttmDiv ? ttmDiv / recentPrice : null;
 
   return {
-    ticker,
-    companyName,
-    exchange,
-    sicDesc,
-    marketCap,
-    sharesOut,
-    homepage,
-    recentPrice,
-    trailingPE,
-    evEbitdaTTM,
-    priceFCF,
-    divYield,
-    ttmRevenue, ttmNetIncome, ttmEBITDA, ttmFCF, ttmEPS, ttmDiv,
-    ev,
-    annuals,
-    priceRanges,
-    monthlyPrices,
-    spyPrices,
-    annualDivs,
+    ticker, companyName, exchange, sicDesc, marketCap, sharesOut, homepage,
+    recentPrice, trailingPE, evEbitdaTTM, priceFCF, divYield,
+    ttmRevenue, ttmNetIncome, ttmEBITDA, ttmFCF, ttmEPS, ttmDiv, ev,
+    annuals, priceRanges, monthlyPrices, spyPrices, annualDivs,
   };
 }
 
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   BUILD PROMPT WITH PRE-COMPUTED DATA
+   BUILD PROMPT — FULL REPORT TEMPLATE WITH PRE-COMPUTED DATA
    ═══════════════════════════════════════════════════════════════════════════ */
 
 function buildPrompt(metrics) {
   const m = metrics;
   const today = todayStr();
 
-  // Format annuals into a readable table for Claude
-  const annualTable = m.annuals.map(a => {
-    return [
-      `Year: ${a.year}`,
-      `  Revenue: ${a.revenue ? '$' + fmtM(a.revenue) + 'M' : 'N/A'}`,
-      `  Net Income: ${a.netIncome ? '$' + fmtM(a.netIncome) + 'M' : 'N/A'}`,
-      `  EPS: ${safe(a.eps)}`,
-      `  EBITDA: ${a.ebitda ? '$' + fmtM(a.ebitda) + 'M' : 'N/A'}`,
-      `  EBITDA Margin: ${fmtPct(a.ebitdaMargin) || 'N/A'}%`,
-      `  Op Margin: ${fmtPct(a.opMargin) || 'N/A'}%`,
-      `  Net Margin: ${fmtPct(a.netMargin) || 'N/A'}%`,
-      `  Book Value/Share: ${safe(a.bookVal)}`,
-      `  Shares (M): ${a.shares ? fmtM(a.shares * 1e6) : 'N/A'}`,
-      `  Operating CF: ${a.opCF ? '$' + fmtM(a.opCF) + 'M' : 'N/A'}`,
-      `  CapEx: ${a.capex ? '$' + fmtM(a.capex) + 'M' : 'N/A'}`,
-      `  FCF: ${a.fcf ? '$' + fmtM(a.fcf) + 'M' : 'N/A'}`,
-      `  Long-Term Debt: ${a.ltDebt ? '$' + fmtM(a.ltDebt) + 'M' : 'N/A'}`,
-      `  Shareholders Equity: ${a.totalEquity ? '$' + fmtM(a.totalEquity) + 'M' : 'N/A'}`,
-      `  Working Capital: ${a.workingCap ? '$' + fmtM(a.workingCap) + 'M' : 'N/A'}`,
-      `  ROE: ${fmtPct(a.roe) || 'N/A'}%`,
-      `  ROTC: ${fmtPct(a.rotc) || 'N/A'}%`,
-    ].join('\n');
-  }).join('\n\n');
+  const annualTable = m.annuals.map(a => [
+    `Year: ${a.year}`,
+    `  Revenue: ${a.revenue ? '$' + fmtM(a.revenue) + 'M' : 'N/A'}`,
+    `  Net Income: ${a.netIncome ? '$' + fmtM(a.netIncome) + 'M' : 'N/A'}`,
+    `  EPS: ${safe(a.eps)}`,
+    `  EBITDA: ${a.ebitda ? '$' + fmtM(a.ebitda) + 'M' : 'N/A'}`,
+    `  EBITDA Margin: ${fmtPct(a.ebitdaMargin) || 'N/A'}%`,
+    `  Op Margin: ${fmtPct(a.opMargin) || 'N/A'}%`,
+    `  Net Margin: ${fmtPct(a.netMargin) || 'N/A'}%`,
+    `  Book Value/Share: ${safe(a.bookVal)}`,
+    `  Shares (M): ${a.shares ? (a.shares / 1e6).toFixed(1) : 'N/A'}`,
+    `  Operating CF: ${a.opCF ? '$' + fmtM(a.opCF) + 'M' : 'N/A'}`,
+    `  CapEx: ${a.capex ? '$' + fmtM(a.capex) + 'M' : 'N/A'}`,
+    `  FCF: ${a.fcf ? '$' + fmtM(a.fcf) + 'M' : 'N/A'}`,
+    `  Long-Term Debt: ${a.ltDebt ? '$' + fmtM(a.ltDebt) + 'M' : 'N/A'}`,
+    `  Shareholders Equity: ${a.totalEquity ? '$' + fmtM(a.totalEquity) + 'M' : 'N/A'}`,
+    `  Working Capital: ${a.workingCap ? '$' + fmtM(a.workingCap) + 'M' : 'N/A'}`,
+    `  ROE: ${fmtPct(a.roe) || 'N/A'}%`,
+    `  ROTC: ${fmtPct(a.rotc) || 'N/A'}%`,
+  ].join('\n')).join('\n\n');
 
-  // Price ranges
   const priceRangeStr = Object.entries(m.priceRanges)
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([yr, r]) => `${yr}: H $${r.high.toFixed(2)} / L $${r.low.toFixed(2)}`)
     .join('\n');
 
-  // Dividend by year
   const divStr = Object.entries(m.annualDivs)
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([yr, amt]) => `${yr}: $${amt.toFixed(2)}/share`)
     .join(', ');
 
-  // Monthly price series for valuation charts (JSON for embedding)
   const monthlyJSON = JSON.stringify(m.monthlyPrices);
   const spyJSON = JSON.stringify(m.spyPrices);
+
+  // Build the Chart.js script tag reference safely
+  const cjs = '<script src="https://cdn.jsdelivr.net/npm/chart.js"><' + '/script>';
 
   return `You are a senior equity analyst at The Fedeli Group. Produce a complete, self-contained HTML equity research report for:
 
@@ -333,15 +299,16 @@ CRITICAL OUTPUT RULE: Return ONLY valid HTML. Your entire response must begin wi
 
 The HTML must contain:
 - All CSS in an embedded <style> block
-- Chart.js loaded from https://cdn.jsdelivr.net/npm/chart.js (script tag in <head>)
+- Chart.js loaded exactly as: ${cjs}
 - All JavaScript in a <script> block just before </body>
 - No other external dependencies
+- Flag all estimates with (E) in column headers only, not in individual cells.
 
 ══════════════════════════════════════════
-PRE-COMPUTED DATA FROM POLYGON.IO
+PRE-COMPUTED DATA FROM POLYGON.IO — USE ONLY THIS DATA
 ══════════════════════════════════════════
 
-Use ONLY the data below. Do NOT fabricate or hallucinate any financial numbers. If a field shows N/A, display "—" in the report. For forward estimates, you may project based on historical trends and state assumptions — mark all estimates with (E).
+Do NOT fabricate financial numbers. Use the data below. For forward estimates, project from historical trends and mark with (E).
 
 CURRENT METRICS (as of ${today}):
   Recent Price: $${safe(m.recentPrice)}
@@ -369,17 +336,13 @@ ${priceRangeStr}
 DIVIDENDS BY YEAR:
 ${divStr || 'None found'}
 
-MONTHLY CLOSING PRICES (for valuation charts — JSON):
+MONTHLY CLOSING PRICES (JSON — for valuation charts):
 Stock: ${monthlyJSON}
 SPY: ${spyJSON}
 
 ══════════════════════════════════════════
-REPORT FORMAT INSTRUCTIONS
+STYLING RULES
 ══════════════════════════════════════════
-
-Follow these formatting rules exactly. Flag all estimates with (E) in column headers only, not in individual cells.
-
-STYLING RULES — use this CSS as your base:
 
 body { font-family: Arial, sans-serif; font-size: 16px; line-height: 1.6; color: #111; max-width: 1200px; margin: 40px auto; padding: 0 24px; }
 .header-table { width: 100%; font-size: 15px; border-collapse: collapse; margin-bottom: 32px; }
@@ -430,62 +393,68 @@ Single HTML table, class "header-table", two rows.
 Row 1 — Primary metrics:
 Company & Ticker | Recent Price | Trailing P/E | Forward P/E | Dividend Yield | Market Cap | Beta | Timeliness (1-5) | Safety (1-5) | Financial Strength
 
-Row 2 — Valuation metrics (white background, four cells spanning full width):
+Row 2 — Valuation metrics (white background #ffffff, four cells spanning full width, label in plain text above value in bold):
 EV/EBITDA (TTM) | EV/EBITDA +1 Yr (E) | EV/EBITDA +2 Yr (E) | PEG Ratio
 
-Always write "EV/EBITDA" in full. Never abbreviate.
-
-For Forward P/E, Beta, Timeliness, Safety, Financial Strength — use your analytical judgment based on the data provided. For forward EV/EBITDA estimates, project from historical trends.
+LABEL GUARDRAIL: Always write "EV/EBITDA" in full everywhere. Never abbreviate.
+For Forward P/E, Beta, Timeliness, Safety, Financial Strength — use analytical judgment. If PEG Ratio is not meaningful, display as N/M.
 
 ══════════════════════════════════════════
 SECTION 2 — MAIN DATA BLOCK
 ══════════════════════════════════════════
-Flex container, class "data-block", two children:
+Flex container class "data-block" with two children:
 
 LEFT — Company Snapshot (class "company-snapshot"):
 6-8 sentences: business description, segments, scale, competitive position, key risks, valuation vs history. Close with HQ, CEO, ticker, website.
 
 RIGHT — stacked vertically:
-1. Annual Price Range Bar (class "price-range-bar") — use the ANNUAL PRICE RANGES data above
-2. Dual-Axis Chart (class "chart-container", height 220px):
-   - EPS bars (navy #1a1a2e, estimate years lighter #7f8fa6)
-   - Relative P/E line (red #c0392b, estimate years dashed)
-   - Left Y: "EPS ($)", Right Y: "Relative P/E"
+
+1. Annual Price Range Bar (class "price-range-bar"):
+   Columns match the financial table fiscal years. Each cell: [YEAR] / H: $XX.XX / L: $XX.XX
+   Navy header background, 13px, center-aligned.
+
+2. Dual-Axis Chart (class "chart-container", canvas, 220px height):
+   EPS bars left axis (navy #1a1a2e, estimate years #7f8fa6)
+   Relative P/E line right axis (red #c0392b, 2px, estimate years dashed)
+   Left Y: "EPS ($)" — Right Y: "Relative P/E"
+   Legend shown. No gridlines on right axis.
+
 3. Financial Table (class "financial-table"):
-   Columns: 5 most recent fiscal years + current FY (E) + next FY (E) + 3-5yr projection
-   Rows in this exact order:
+   Columns: 5 most recent fiscal years + current FY (E) + next FY (E) + 3-5yr projection range
+   Rows in this EXACT order:
    Revenues per Share | Earnings per Share | Book Value per Share | Shares/Units Outstanding (M) | Avg Ann'l P/E Ratio | Relative P/E Ratio | Avg Ann'l Dist. Yield | Revenues ($mill) | EBITDA ($mill) | EBITDA Margin (%) | Operating Margin (%) | Net Profit ($mill) | Net Profit Margin (%) | Cash Flow ($mill) | Capital Expenditures ($mill) | Free Cash Flow ($mill) | Working Cap'l ($mill) | Long-Term Debt ($mill) | Partners'/Shareholders' Capital ($mill) | Return on Total Cap'l (%) | Return on Equity (%) | Dist. Decl'd per Share | All Dist. to Net Profit (%)
+   Use — for unavailable data.
 
 ══════════════════════════════════════════
 SECTION 3 — HISTORICAL VALUATION CHARTS
 ══════════════════════════════════════════
-Three side-by-side Chart.js panels below the data block, above the narrative.
+Three side-by-side Chart.js panels below data block, above narrative.
 
-Use the MONTHLY CLOSING PRICES data to compute valuation multiples over time.
+Section header: "Historical Absolute & Relative Valuation — Forward P/E | Price / FCF | Forward EV/EBITDA  vs. S&P 500"
+Source line: "Source: Polygon.io, Company Filings, TFG Research | As of ${today}"
 
-For each month:
-- Forward P/E ≈ price / (TTM EPS × growth factor) — use most recent annual EPS scaled
-- P/FCF = market cap at that price / TTM FCF
-- Forward EV/EBITDA ≈ EV at that price / forward EBITDA estimate
+Three panels in a CSS grid (1fr 1fr 1fr):
+Panel 1: Forward P/E vs S&P 500
+Panel 2: P/FCF vs S&P 500
+Panel 3: Forward EV/EBITDA vs S&P 500
 
-For S&P 500 (SPY), use approximate index-level multiples: Forward P/E ~18-22x range, P/FCF ~22-28x, Forward EV/EBITDA ~14-18x. Scale these by SPY price movement from the data.
+Each panel has: left axis (absolute multiple), right axis (relative to S&P as %), shaded ±1σ band, average dashed lines, annotation box with current vs avg.
 
-Relative series = stock multiple / S&P multiple × 100
+Use the monthly price data to compute multiples. For S&P 500 approximate multiples: Forward P/E ~18-22x, P/FCF ~22-28x, Forward EV/EBITDA ~14-18x, scaled by SPY price movement.
 
-Use the buildValChart function pattern with these datasets on each panel:
-- ±1σ shaded band, stock absolute line, avg dashed, relative % on right axis
-
-Panel 1: Forward P/E | Panel 2: P/FCF | Panel 3: Forward EV/EBITDA
+Use the buildValChart function pattern:
+function buildValChart(canvasId, stockData, relData, avgAbs, stdAbs, avgRel, leftMax, leftMin, rightMax, rightMin) with datasets: _hi/_lo for σ band, stock line, avg dashed, ±1σ dashed, relative % on right axis, avg rel dashed.
+Options: responsive, no animation, interaction mode index intersect false, legend display false, tooltip filter to suppress _hi/_lo, tooltip labels append x or % based on axis.
 
 ══════════════════════════════════════════
 SECTION 4 — ANALYST NARRATIVE
 ══════════════════════════════════════════
 div class "narrative", three paragraphs, no headers or bullets:
-¶1 — Recent Results: earnings quality assessment
-¶2 — Outlook: 2-3 key drivers, specific risks
-¶3 — Valuation & Recommendation: rating, price target, multiple applied, what changes the view
+P1 — Recent Results: earnings quality, not just headline
+P2 — Outlook: 2-3 key drivers next 12-24 months, specific risks
+P3 — Valuation & Recommendation: rating, price target, multiple applied, what changes the view
 
-Close with: <p class="analyst-sig">Fedeli Group Research | ${today} | Next Expected Earnings: [estimate]</p>
+Close: <p class="analyst-sig">Fedeli Group Research | ${today} | Next Expected Earnings: [estimate]</p>
 
 ══════════════════════════════════════════
 SECTION 5 — GOOD FOR WHAT?!?
@@ -494,7 +463,11 @@ Full-width div: background #1a1a2e, color white, padding 24px 28px, margin-top 4
 <h3 style="color:#AD9551;font-family:Georgia,serif;font-size:18px;font-weight:700;margin-bottom:12px">GOOD FOR WHAT?!?</h3>
 3-4 opinionated plain-language sentences: who this stock IS and IS NOT right for. No hedging. Be direct.
 
-DATA SOURCE NOTICE: Add a small footer: "Financial data sourced from Polygon.io. Report generated ${today}."
+══════════════════════════════════════════
+FOOTER
+══════════════════════════════════════════
+Small footer div: "Financial data sourced from Polygon.io. Report generated ${today}. For internal use only — not investment advice."
+Style: font-size 11px, color #999, margin-top 32px, border-top 1px solid #eee, padding-top 12px.
 `;
 }
 
@@ -504,7 +477,6 @@ DATA SOURCE NOTICE: Add a small footer: "Financial data sourced from Polygon.io.
    ═══════════════════════════════════════════════════════════════════════════ */
 
 module.exports = async function handler(req, res) {
-  // CORS
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -513,40 +485,51 @@ module.exports = async function handler(req, res) {
 
   const { query } = req.body || {};
   if (!query) return res.status(400).json({ error: 'Missing ticker in request body.' });
-  if (!POLYGON_KEY) return res.status(500).json({ error: 'POLYGON_API_KEY not configured.' });
-  if (!ANTHROPIC_KEY) return res.status(500).json({ error: 'ANTHROPIC_API_KEY not configured.' });
+  if (!POLYGON_KEY) return res.status(500).json({ error: 'POLYGON_API_KEY not configured in Vercel environment variables.' });
+  if (!ANTHROPIC_KEY) return res.status(500).json({ error: 'ANTHROPIC_API_KEY not configured in Vercel environment variables.' });
 
   const ticker = query.trim().toUpperCase();
 
   try {
-    // ── Phase 1: Fetch all data from Polygon ──────────────────────────
-    console.log(`[${ticker}] Fetching data from Polygon.io...`);
+    // Phase 1: Fetch from Polygon
+    console.log(`[${ticker}] Fetching Polygon.io data...`);
     const rawData = await fetchTickerData(ticker);
-
     if (!rawData.co.name) {
-      return res.status(404).json({ error: `Ticker "${ticker}" not found in Polygon.io.` });
+      return res.status(404).json({ error: `Ticker "${ticker}" not found in Polygon.io. Check the symbol and try again.` });
     }
 
-    // ── Phase 2: Compute derived metrics ──────────────────────────────
+    // Phase 2: Compute metrics
     console.log(`[${ticker}] Computing metrics...`);
     const metrics = computeMetrics(rawData);
 
-    // ── Phase 3: Build prompt and call Claude ─────────────────────────
-    console.log(`[${ticker}] Generating report via Claude...`);
+    // Phase 3: Build prompt and call Claude
+    console.log(`[${ticker}] Calling Claude for report generation...`);
     const prompt = buildPrompt(metrics);
-
-    const anthropicRes = await anthropicPost({
+    const payload = JSON.stringify({
       model: 'claude-sonnet-4-6',
       max_tokens: 32000,
       messages: [{ role: 'user', content: prompt }]
     });
 
+    const anthropicRes = await httpsPost({
+      hostname: 'api.anthropic.com',
+      path: '/v1/messages',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': ANTHROPIC_KEY,
+        'anthropic-version': '2023-06-01',
+        'Content-Length': Buffer.byteLength(payload)
+      }
+    }, payload);
+
+    const parsed = JSON.parse(anthropicRes.body);
     if (anthropicRes.status !== 200) {
-      const msg = anthropicRes.body?.error?.message || `Anthropic returned HTTP ${anthropicRes.status}`;
+      const msg = parsed?.error?.message || `Anthropic returned HTTP ${anthropicRes.status}`;
       return res.status(anthropicRes.status).json({ error: msg });
     }
 
-    let html = (anthropicRes.body.content || [])
+    let html = (parsed.content || [])
       .filter(b => b.type === 'text')
       .map(b => b.text)
       .join('')
@@ -559,9 +542,14 @@ module.exports = async function handler(req, res) {
       return res.status(500).json({ error: 'Claude returned an empty response.' });
     }
 
-    // Return both HTML and the raw metrics for debugging
+    // Phase 4: Save to KV for sharing
+    const id = generateId();
+    const saved = await kvSet('report:' + id, html);
+    console.log(`[${ticker}] Report saved to KV: ${saved ? id : 'SKIPPED (KV not configured)'}`);
+
     return res.status(200).json({
       html,
+      id: saved ? id : null,
       dataSource: 'polygon.io',
       ticker: metrics.ticker,
       companyName: metrics.companyName
