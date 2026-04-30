@@ -2,9 +2,13 @@
   "functions": {
     "api/research.js": {
       "maxDuration": 300
+    },
+    "api/load.js": {
+      "maxDuration": 10
     }
   },
   "rewrites": [
-    { "source": "/api/research", "destination": "/api/research.js" }
+    { "source": "/api/research", "destination": "/api/research.js" },
+    { "source": "/api/load", "destination": "/api/load.js" }
   ]
 }

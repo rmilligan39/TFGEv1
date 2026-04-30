@@ -1,303 +1,221 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>TFG Equity Research</title>
-<style>
-*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Fedeli Group | Equity Research Generator</title>
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=IBM+Plex+Sans:wght@300;400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --gold: #AD9551; --gold-lt: #c8b06e; --gold-dim: rgba(173,149,81,0.15);
+      --navy: #1a1a2e; --charcoal: #2c2c3e; --gray: #9a9a9a; --border: #e0ddd6; --red: #c0392b;
+    }
+    html, body { height: 100%; font-family: 'IBM Plex Sans', sans-serif; background: #fff; color: var(--navy); }
+    .screen { display: none; }
+    .screen.active { display: flex; }
 
-:root {
-  --navy: #1a1a2e;
-  --gold: #AD9551;
-  --gold-light: #c4ad6e;
-  --bg: #fafaf8;
-  --text: #222;
-  --gray: #888;
-  --border: #ddd;
-}
+    /* ══ LANDING ══ */
+    #landing {
+      min-height: 100vh; flex-direction: column; align-items: center; justify-content: center;
+      background: #fff; padding: 40px 20px; position: relative; overflow: hidden;
+    }
+    #landing::before {
+      content: ''; position: absolute; inset: 0;
+      background-image: linear-gradient(rgba(173,149,81,0.04) 1px, transparent 1px),
+                        linear-gradient(90deg, rgba(173,149,81,0.04) 1px, transparent 1px);
+      background-size: 48px 48px; pointer-events: none;
+    }
+    #landing::after {
+      content: ''; position: absolute; top: -200px; right: -200px; width: 600px; height: 600px;
+      border-radius: 50%; background: radial-gradient(circle, rgba(173,149,81,0.06) 0%, transparent 70%);
+      pointer-events: none;
+    }
 
-body {
-  font-family: 'Georgia', 'Times New Roman', serif;
-  background: var(--bg);
-  color: var(--text);
-  min-height: 100vh;
-}
+    .landing-card {
+      position: relative; z-index: 1; width: 100%; max-width: 520px;
+      background: #fff; border: 1px solid var(--border); border-radius: 8px;
+      padding: 40px 36px; box-shadow: 0 4px 24px rgba(0,0,0,0.06);
+    }
 
-/* ── Screens ── */
-.screen { display: none; }
-.screen.active { display: flex; }
+    .brand-lockup { display: flex; align-items: center; gap: 10px; margin-bottom: 28px; }
+    .brand-mark {
+      width: 32px; height: 32px; display: flex; align-items: center; justify-content: center;
+    }
+    .brand-text .brand-name {
+      font-family: 'Playfair Display', serif; font-size: 16px; font-weight: 700;
+      color: var(--navy); letter-spacing: 0.3px;
+    }
+    .brand-text .brand-sub {
+      font-size: 11px; color: var(--gold); letter-spacing: 1.5px; text-transform: uppercase;
+      font-weight: 500; margin-top: -1px;
+    }
 
-/* ── Landing ── */
-#landing {
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  min-height: 100vh;
-  padding: 40px 24px;
-}
-.brand {
-  text-align: center;
-  margin-bottom: 48px;
-}
-.brand h1 {
-  font-size: 32px;
-  font-weight: 700;
-  color: var(--navy);
-  letter-spacing: -0.5px;
-  margin-bottom: 6px;
-}
-.brand h1 span { color: var(--gold); }
-.brand .subtitle {
-  font-size: 15px;
-  color: var(--gray);
-  font-style: italic;
-  letter-spacing: 0.3px;
-}
-.brand .data-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  margin-top: 14px;
-  padding: 6px 14px;
-  background: #f0eee6;
-  border: 1px solid #d8d4c4;
-  border-radius: 4px;
-  font-family: Arial, sans-serif;
-  font-size: 11px;
-  color: #666;
-  letter-spacing: 0.4px;
-  text-transform: uppercase;
-}
-.brand .data-badge .dot {
-  width: 7px; height: 7px;
-  background: #22c55e;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
+    .landing-headline {
+      font-family: 'Playfair Display', serif; font-size: 28px; font-weight: 700;
+      line-height: 1.25; color: var(--navy); margin-bottom: 12px;
+    }
+    .landing-sub {
+      font-size: 14px; color: #666; line-height: 1.65; margin-bottom: 28px;
+    }
 
-/* ── Input area ── */
-.input-area {
-  width: 100%;
-  max-width: 520px;
-  text-align: center;
-}
-.input-area label {
-  display: block;
-  font-size: 14px;
-  font-family: Arial, sans-serif;
-  color: #555;
-  margin-bottom: 10px;
-  text-align: left;
-}
-.input-row {
-  display: flex;
-  gap: 10px;
-}
-.input-row input {
-  flex: 1;
-  font-family: 'Courier New', monospace;
-  font-size: 20px;
-  font-weight: 700;
-  letter-spacing: 1px;
-  text-transform: uppercase;
-  padding: 14px 18px;
-  border: 2px solid var(--border);
-  border-radius: 4px;
-  background: white;
-  color: var(--navy);
-  outline: none;
-  transition: border-color 0.2s;
-}
-.input-row input:focus { border-color: var(--gold); }
-.input-row input::placeholder {
-  font-family: Georgia, serif;
-  font-weight: 400;
-  font-size: 16px;
-  letter-spacing: 0;
-  text-transform: none;
-  color: #bbb;
-}
-.btn-generate {
-  font-family: Arial, sans-serif;
-  font-size: 15px;
-  font-weight: 600;
-  padding: 14px 28px;
-  background: var(--navy);
-  color: white;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: background 0.2s;
-}
-.btn-generate:hover { background: #2a2a4e; }
-.btn-generate:disabled { background: #999; cursor: not-allowed; }
-.btn-generate .arrow { margin-left: 6px; }
+    .data-badge {
+      display: inline-flex; align-items: center; gap: 6px;
+      margin-bottom: 20px; padding: 5px 12px;
+      background: #f7f5ee; border: 1px solid #e8e4d6; border-radius: 4px;
+      font-size: 10px; color: #888; letter-spacing: 0.5px; text-transform: uppercase;
+    }
+    .data-badge .dot { width: 6px; height: 6px; background: #22c55e; border-radius: 50%; }
 
-/* ── Error ── */
-.error-msg {
-  display: none;
-  margin-top: 14px;
-  padding: 10px 16px;
-  background: #fff0f0;
-  border: 1px solid #e8c0c0;
-  border-radius: 4px;
-  color: #a33;
-  font-family: Arial, sans-serif;
-  font-size: 13px;
-  text-align: left;
-}
+    .field-group { margin-bottom: 20px; }
+    .field-group label {
+      display: block; font-size: 12px; font-weight: 600; color: #555;
+      letter-spacing: 0.5px; text-transform: uppercase; margin-bottom: 6px;
+    }
+    #ticker-input {
+      width: 100%; font-family: 'IBM Plex Mono', monospace; font-size: 18px;
+      font-weight: 500; letter-spacing: 0.5px; text-transform: uppercase;
+      padding: 14px 16px; border: 1.5px solid var(--border); border-radius: 5px;
+      background: #fafaf8; color: var(--navy); outline: none; transition: border-color 0.2s;
+    }
+    #ticker-input:focus { border-color: var(--gold); background: #fff; }
+    #ticker-input::placeholder {
+      font-family: 'IBM Plex Sans', sans-serif; font-weight: 400;
+      font-size: 14px; letter-spacing: 0; text-transform: none; color: #bbb;
+    }
 
-/* ── Loading ── */
-#loading {
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  min-height: 100vh;
-  padding: 40px 24px;
-  text-align: center;
-}
-.loading-ticker {
-  font-family: 'Courier New', monospace;
-  font-size: 36px;
-  font-weight: 700;
-  color: var(--navy);
-  margin-bottom: 8px;
-}
-.loading-status {
-  font-size: 14px;
-  font-family: Arial, sans-serif;
-  color: var(--gray);
-  margin-bottom: 32px;
-}
-.pipeline-steps {
-  width: 100%;
-  max-width: 400px;
-  text-align: left;
-}
-.step {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 9px 0;
-  font-family: Arial, sans-serif;
-  font-size: 13px;
-  color: #aaa;
-  border-bottom: 1px solid #eee;
-  transition: color 0.3s;
-}
-.step.active { color: var(--navy); font-weight: 600; }
-.step.done { color: #22c55e; }
-.step .icon {
-  width: 20px;
-  text-align: center;
-  flex-shrink: 0;
-  font-size: 14px;
-}
-.step.active .icon::after { content: '\25B6'; color: var(--gold); }
-.step.done .icon::after { content: '\2713'; color: #22c55e; }
-.step:not(.active):not(.done) .icon::after { content: '\25CB'; color: #ccc; }
+    #btn-generate {
+      width: 100%; font-family: 'IBM Plex Sans', sans-serif; font-size: 15px;
+      font-weight: 600; padding: 14px; background: var(--navy); color: white;
+      border: none; border-radius: 5px; cursor: pointer; transition: background 0.2s;
+      margin-top: 8px;
+    }
+    #btn-generate:hover { background: var(--charcoal); }
+    #btn-generate:disabled { background: #999; cursor: not-allowed; }
+    #btn-generate .arrow { margin-left: 6px; }
 
-/* ── Report screen ── */
-#report-screen {
-  flex-direction: column;
-  height: 100vh;
-}
-.toolbar {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  padding: 10px 20px;
-  background: var(--navy);
-  color: white;
-  font-family: Arial, sans-serif;
-  font-size: 13px;
-  flex-shrink: 0;
-}
-.toolbar .tb-company {
-  font-weight: 700;
-  font-size: 15px;
-  letter-spacing: 0.5px;
-}
-.toolbar .tb-source {
-  font-size: 11px;
-  color: var(--gold-light);
-  margin-left: 4px;
-}
-.toolbar .spacer { flex: 1; }
-.tb-btn {
-  font-family: Arial, sans-serif;
-  font-size: 12px;
-  padding: 6px 14px;
-  border: 1px solid rgba(255,255,255,0.25);
-  border-radius: 3px;
-  background: transparent;
-  color: white;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-.tb-btn:hover { background: rgba(255,255,255,0.1); border-color: rgba(255,255,255,0.5); }
-.tb-btn.gold { background: var(--gold); border-color: var(--gold); color: var(--navy); font-weight: 600; }
-.tb-btn.gold:hover { background: var(--gold-light); }
-.tb-btn.copied { background: #22c55e; border-color: #22c55e; }
+    #error-box {
+      display: none; margin-top: 14px; padding: 10px 14px;
+      background: #fff0f0; border: 1px solid #e8c0c0; border-radius: 4px;
+      color: #a33; font-size: 13px; line-height: 1.5;
+    }
 
-#report-frame {
-  flex: 1;
-  border: none;
-  width: 100%;
-  background: white;
-}
+    .landing-footer {
+      position: relative; z-index: 1; margin-top: 24px;
+      font-size: 11px; color: #bbb; text-align: center; line-height: 1.6;
+    }
+    .landing-footer a { color: #999; }
 
-/* ── Toast ── */
-#share-toast {
-  display: none;
-  position: fixed;
-  bottom: 24px;
-  left: 50%;
-  transform: translateX(-50%);
-  background: var(--navy);
-  color: white;
-  font-family: Arial, sans-serif;
-  font-size: 13px;
-  padding: 10px 24px;
-  border-radius: 6px;
-  box-shadow: 0 4px 20px rgba(0,0,0,0.25);
-  z-index: 999;
-}
+    /* ══ LOADING ══ */
+    #loading {
+      min-height: 100vh; flex-direction: column; align-items: center; justify-content: center;
+      gap: 32px; padding: 40px 20px;
+    }
+    .spinner {
+      width: 32px; height: 32px; border: 3px solid #eee;
+      border-top-color: var(--gold); border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    #loading-name {
+      font-family: 'IBM Plex Mono', monospace; font-size: 28px;
+      font-weight: 500; color: var(--navy); letter-spacing: 1px;
+    }
+    #loading-status { font-size: 13px; color: var(--gray); }
+    .steps { width: 100%; max-width: 360px; }
+    .step {
+      display: flex; align-items: center; gap: 10px;
+      padding: 8px 0; font-size: 13px; color: #ccc;
+      border-bottom: 1px solid #f0f0f0; transition: color 0.3s;
+    }
+    .step .dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: #ddd; flex-shrink: 0; transition: background 0.3s;
+    }
+    .step.active { color: var(--navy); font-weight: 500; }
+    .step.active .dot { background: var(--gold); }
+    .step.done { color: #22c55e; }
+    .step.done .dot { background: #22c55e; }
 
-/* ── Footer ── */
-.landing-footer {
-  margin-top: 48px;
-  font-family: Arial, sans-serif;
-  font-size: 11px;
-  color: #bbb;
-  text-align: center;
-  line-height: 1.7;
-}
-.landing-footer a { color: #999; }
-</style>
+    /* ══ REPORT ══ */
+    #report-screen { flex-direction: column; height: 100vh; }
+    .toolbar {
+      display: flex; align-items: center; gap: 12px;
+      padding: 0 20px; height: 48px; background: var(--navy);
+      font-size: 13px; flex-shrink: 0;
+    }
+    .tb-brand {
+      font-family: 'Playfair Display', serif; font-size: 14px;
+      font-weight: 600; color: white; white-space: nowrap;
+    }
+    .tb-sep { color: rgba(255,255,255,0.25); margin: 0 4px; }
+    .tb-sub { color: var(--gold-lt); font-weight: 400; font-size: 12px; }
+    #tb-company {
+      font-family: 'IBM Plex Mono', monospace; font-size: 13px;
+      font-weight: 500; color: rgba(255,255,255,0.7); letter-spacing: 0.5px;
+    }
+    .tb-source {
+      font-size: 10px; color: var(--gold-lt); opacity: 0.7;
+    }
+    .tb-actions { margin-left: auto; display: flex; gap: 8px; }
+    .tb-btn {
+      font-family: 'IBM Plex Sans', sans-serif; font-size: 12px;
+      padding: 5px 14px; border: 1px solid rgba(255,255,255,0.2);
+      border-radius: 3px; background: transparent; color: white;
+      cursor: pointer; transition: all 0.2s; white-space: nowrap;
+    }
+    .tb-btn:hover { background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.4); }
+    .btn-copy {
+      background: var(--gold) !important; border-color: var(--gold) !important;
+      color: var(--navy) !important; font-weight: 600;
+    }
+    .btn-copy:hover { background: var(--gold-lt) !important; }
+    .btn-copy.copied { background: #22c55e !important; border-color: #22c55e !important; color: white !important; }
+    .btn-print { background: var(--gold) !important; color: var(--navy) !important; }
+    .btn-print:hover { background: var(--gold-lt) !important; }
+
+    #report-frame { flex: 1; width: 100%; border: none; background: #fff; }
+
+    /* ══ Toast ══ */
+    #share-toast {
+      display: none; position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+      background: var(--navy); color: white; font-size: 13px;
+      padding: 10px 24px; border-radius: 6px; box-shadow: 0 4px 20px rgba(0,0,0,0.25);
+      z-index: 999;
+    }
+  </style>
 </head>
 <body>
 
-<!-- ══════════ LANDING ══════════ -->
+<!-- ═══════════════ LANDING ═══════════════ -->
 <div id="landing" class="screen active">
-  <div class="brand">
-    <h1>TFG <span>Equity Research</span></h1>
-    <div class="subtitle">Institutional-Grade Analysis &middot; The Fedeli Group</div>
-    <div class="data-badge">
-      <span class="dot"></span>
-      Powered by Polygon.io &amp; Claude
+  <div class="landing-card">
+    <div class="brand-lockup">
+      <div class="brand-mark">
+        <svg viewBox="0 0 22 22" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <rect x="1" y="1" width="20" height="20" stroke="#AD9551" stroke-width="1.5"/>
+          <path d="M4 17L8.5 8L13 14L16 10L18 17H4Z" fill="#AD9551" opacity="0.8"/>
+          <path d="M4 11H18" stroke="#AD9551" stroke-width="0.75" opacity="0.4"/>
+        </svg>
+      </div>
+      <div class="brand-text">
+        <div class="brand-name">Fedeli Group</div>
+        <div class="brand-sub">Equity Research</div>
+      </div>
     </div>
-  </div>
 
-  <div class="input-area">
-    <label for="ticker">Enter a ticker symbol to generate a full research report</label>
-    <div class="input-row">
-      <input type="text" id="ticker" placeholder="e.g. AAPL, MSFT, SPGI" autocomplete="off" spellcheck="false">
-      <button id="btn-generate" class="btn-generate">Generate Report <span class="arrow">&#8594;</span></button>
+    <h1 class="landing-headline">Institutional Research,<br/>On Demand.</h1>
+    <p class="landing-sub">Enter any public company name or ticker symbol to generate a comprehensive equity research report with financial tables, valuation metrics, charts, and an analyst narrative.</p>
+
+    <div class="data-badge"><span class="dot"></span> Powered by Polygon.io &amp; Claude</div>
+
+    <div class="field-group">
+      <label for="ticker-input">Company Name or Ticker Symbol</label>
+      <input type="text" id="ticker-input" placeholder="e.g.  BX,  Blackstone,  ORCL,  Oracle&#8230;" autocomplete="off" spellcheck="false" />
     </div>
-    <div id="error-msg" class="error-msg"></div>
+
+    <button id="btn-generate">Generate Research Report <span class="arrow">&#8594;</span></button>
+    <div id="error-box"></div>
   </div>
 
   <div class="landing-footer">
@@ -307,99 +225,75 @@ body {
   </div>
 </div>
 
-<!-- ══════════ LOADING ══════════ -->
+<!-- ═══════════════ LOADING ═══════════════ -->
 <div id="loading" class="screen">
-  <div class="loading-ticker" id="loading-name"></div>
-  <div class="loading-status" id="loading-status">Initializing data pipeline&hellip;</div>
-  <div class="pipeline-steps">
-    <div class="step" data-step="1"><span class="icon"></span>Resolving ticker via Polygon.io</div>
-    <div class="step" data-step="2"><span class="icon"></span>Fetching annual &amp; quarterly financials</div>
-    <div class="step" data-step="3"><span class="icon"></span>Loading price history &amp; computing ranges</div>
-    <div class="step" data-step="4"><span class="icon"></span>Pulling S&amp;P 500 data for relative valuation</div>
-    <div class="step" data-step="5"><span class="icon"></span>Computing derived metrics &amp; ratios</div>
-    <div class="step" data-step="6"><span class="icon"></span>Generating report via Claude</div>
-    <div class="step" data-step="7"><span class="icon"></span>Rendering HTML with Chart.js</div>
+  <div style="display:flex;align-items:center;gap:12px;">
+    <div class="brand-mark" style="width:36px;height:36px;">
+      <svg viewBox="0 0 22 22" fill="none"><rect x="1" y="1" width="20" height="20" stroke="#AD9551" stroke-width="1.5"/><path d="M4 17L8.5 8L13 14L16 10L18 17H4Z" fill="#AD9551" opacity="0.85"/></svg>
+    </div>
+    <span style="font-family:'Playfair Display',serif;font-size:16px;font-weight:600;color:#1a1a2e;">Fedeli Group</span>
+  </div>
+  <div style="display:flex;flex-direction:column;align-items:center;gap:20px;">
+    <div class="spinner"></div>
+    <div id="loading-name"></div>
+    <div id="loading-status">Initializing&#8230;</div>
+  </div>
+  <div class="steps">
+    <div class="step" id="s1"><div class="dot"></div>Resolving ticker via Polygon.io</div>
+    <div class="step" id="s2"><div class="dot"></div>Fetching annual &amp; quarterly financials</div>
+    <div class="step" id="s3"><div class="dot"></div>Loading price history &amp; computing ranges</div>
+    <div class="step" id="s4"><div class="dot"></div>Generating charts &amp; financial tables</div>
+    <div class="step" id="s5"><div class="dot"></div>Writing analyst narrative</div>
+    <div class="step" id="s6"><div class="dot"></div>Rendering final report</div>
   </div>
 </div>
 
-<!-- ══════════ REPORT ══════════ -->
+<!-- ═══════════════ REPORT ═══════════════ -->
 <div id="report-screen" class="screen">
   <div class="toolbar">
-    <button id="btn-back" class="tb-btn">&larr; New Report</button>
-    <span class="tb-company" id="tb-company"></span>
+    <div class="tb-brand">Fedeli Group <span class="tb-sep">|</span> <span class="tb-sub">Equity Research</span></div>
+    <div id="tb-company"></div>
     <span class="tb-source">via Polygon.io</span>
-    <span class="spacer"></span>
-    <button id="btn-copy" class="tb-btn gold">&#128279; Copy Link</button>
-    <button id="btn-print" class="tb-btn">Print</button>
+    <div class="tb-actions">
+      <button class="tb-btn" id="btn-back">&#8592; New Report</button>
+      <button class="tb-btn btn-copy" id="btn-copy">&#128279; Copy Link</button>
+      <button class="tb-btn btn-print" id="btn-print">Print / PDF</button>
+    </div>
   </div>
-  <iframe id="report-frame" sandbox="allow-scripts allow-same-origin"></iframe>
+  <iframe id="report-frame" title="Equity Research Report" sandbox="allow-scripts allow-same-origin"></iframe>
 </div>
 
-<div id="share-toast">Link copied to clipboard</div>
+<div id="share-toast">&#10003; Link copied to clipboard</div>
 
 <script>
 (function () {
   'use strict';
+  var g = function (id) { return document.getElementById(id); };
 
-  function g(id) { return document.getElementById(id); }
+  /* ── Screen switcher ── */
+  var ALL = ['landing', 'loading', 'report-screen'];
+  function showScreen(id) { ALL.forEach(function (s) { g(s).classList.remove('active'); }); g(id).classList.add('active'); }
 
-  /* ── Screen management ── */
-  function showScreen(id) {
-    document.querySelectorAll('.screen').forEach(function (s) { s.classList.remove('active'); });
-    g(id).classList.add('active');
-  }
+  /* ── Error ── */
+  function showError(msg) { var b = g('error-box'); b.textContent = msg; b.style.display = 'block'; }
+  function clearError() { g('error-box').style.display = 'none'; }
 
-  /* ── Error display ── */
-  function showError(msg) {
-    var el = g('error-msg');
-    el.textContent = msg;
-    el.style.display = 'block';
-  }
-  function clearError() { g('error-msg').style.display = 'none'; }
-
-  /* ── Pipeline step animation ── */
+  /* ── Steps ── */
+  var STEPS = ['s1','s2','s3','s4','s5','s6'];
   var stepTimer = null;
-  var currentStep = 0;
-
   function startSteps() {
-    currentStep = 0;
-    var steps = document.querySelectorAll('.step');
-    steps.forEach(function (s) { s.classList.remove('active', 'done'); });
-
-    var delays = [0, 2000, 4500, 7000, 9500, 13000, 60000];
-    // Steps 1-5 are data fetching (~15s), step 6 is Claude (~30-90s), step 7 on completion
-
-    function advance() {
-      if (currentStep >= steps.length) return;
-
-      // Mark previous as done
-      if (currentStep > 0) steps[currentStep - 1].classList.remove('active');
-      if (currentStep > 0) steps[currentStep - 1].classList.add('done');
-
-      steps[currentStep].classList.add('active');
-      currentStep++;
-
-      if (currentStep < steps.length) {
-        var nextDelay = (delays[currentStep] || 5000) - (delays[currentStep - 1] || 0);
-        stepTimer = setTimeout(advance, nextDelay);
-      }
-    }
-    advance();
+    STEPS.forEach(function (id) { g(id).className = 'step'; });
+    var i = 0;
+    stepTimer = setInterval(function () {
+      if (i > 0) g(STEPS[i - 1]).className = 'step done';
+      if (i < STEPS.length) { g(STEPS[i]).className = 'step active'; i++; }
+      else clearInterval(stepTimer);
+    }, 3000);
   }
+  function stopSteps() { clearInterval(stepTimer); STEPS.forEach(function (id) { g(id).className = 'step done'; }); }
+  function resetSteps() { clearInterval(stepTimer); STEPS.forEach(function (id) { g(id).className = 'step'; }); }
 
-  function stopSteps() {
-    clearTimeout(stepTimer);
-    var steps = document.querySelectorAll('.step');
-    steps.forEach(function (s) { s.classList.remove('active'); s.classList.add('done'); });
-  }
-
-  function resetSteps() {
-    clearTimeout(stepTimer);
-    currentStep = 0;
-    document.querySelectorAll('.step').forEach(function (s) { s.classList.remove('active', 'done'); });
-  }
-
-  /* ── API call ── */
+  /* ── API calls ── */
   async function callAPI(query) {
     var res = await fetch('/api/research', {
       method: 'POST',
@@ -411,57 +305,74 @@ body {
     return data;
   }
 
+  async function loadReport(id) {
+    showScreen('loading');
+    g('loading-name').textContent = 'Loading shared report\u2026';
+    g('loading-status').textContent = '';
+    try {
+      var res = await fetch('/api/load?id=' + encodeURIComponent(id));
+      var data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Load failed');
+      g('tb-company').textContent = 'Shared Report';
+      g('report-frame').srcdoc = data.html;
+      setTimeout(function () { showScreen('report-screen'); }, 200);
+    } catch (err) {
+      showScreen('landing');
+      setTimeout(function () { showError('Could not load shared report: ' + err.message); }, 150);
+    }
+  }
+
   /* ── Generate handler ── */
   g('btn-generate').addEventListener('click', async function () {
-    var query = g('ticker').value.trim();
+    var query = g('ticker-input').value.trim();
     var btn = g('btn-generate');
     clearError();
-    if (!query) return showError('Please enter a ticker symbol.');
+    if (!query) return showError('Please enter a company name or ticker symbol.');
 
     btn.disabled = true;
-    btn.innerHTML = 'Generating&hellip; please wait';
+    btn.innerHTML = 'Generating&#8230; please wait';
     g('loading-name').textContent = query.toUpperCase();
-    g('loading-status').textContent = 'Fetching data from Polygon.io\u2026';
+    g('loading-status').textContent = 'Fetching data from Polygon.io&#8230;';
     showScreen('loading');
     startSteps();
 
     try {
       var result = await callAPI(query);
       stopSteps();
-      g('loading-status').textContent = 'Rendering report\u2026';
       g('tb-company').textContent = (result.companyName || query.toUpperCase()) + ' (' + (result.ticker || query.toUpperCase()) + ')';
       g('report-frame').srcdoc = result.html;
 
-      // Update URL for sharing
-      var reportId = query.toUpperCase() + '-' + Date.now().toString(36);
-      var newUrl = window.location.pathname + '?t=' + encodeURIComponent(query.toUpperCase());
-      history.pushState({ ticker: query }, '', newUrl);
+      // Update URL with share ID if KV saved
+      if (result.id) {
+        var newUrl = window.location.pathname + '?id=' + result.id;
+        history.pushState({ id: result.id }, '', newUrl);
+      }
 
       setTimeout(function () { showScreen('report-screen'); }, 350);
     } catch (err) {
       resetSteps();
       btn.disabled = false;
-      btn.innerHTML = 'Generate Report <span class="arrow">&#8594;</span>';
+      btn.innerHTML = 'Generate Research Report <span class="arrow">&#8594;</span>';
       showScreen('landing');
       setTimeout(function () { showError(err.message); }, 150);
     }
   });
 
   /* ── Enter key ── */
-  g('ticker').addEventListener('keydown', function (e) { if (e.key === 'Enter') g('btn-generate').click(); });
+  g('ticker-input').addEventListener('keydown', function (e) { if (e.key === 'Enter') g('btn-generate').click(); });
 
-  /* ── Back button ── */
+  /* ── Back ── */
   g('btn-back').addEventListener('click', function () {
     g('report-frame').srcdoc = '';
     resetSteps();
     var btn = g('btn-generate');
     btn.disabled = false;
-    btn.innerHTML = 'Generate Report <span class="arrow">&#8594;</span>';
+    btn.innerHTML = 'Generate Research Report <span class="arrow">&#8594;</span>';
     history.pushState({}, '', window.location.pathname);
     showScreen('landing');
   });
 
-  /* ── Copy link ── */
+  /* ── Copy Link ── */
   g('btn-copy').addEventListener('click', function () {
     var btn = g('btn-copy');
     var url = window.location.href;
@@ -469,39 +380,37 @@ body {
     navigator.clipboard.writeText(url).then(function () {
       btn.innerHTML = '&#10003; Copied';
       btn.classList.add('copied');
-      var toast = g('share-toast');
-      toast.style.display = 'block';
+      g('share-toast').style.display = 'block';
       setTimeout(function () {
         btn.innerHTML = original;
         btn.classList.remove('copied');
-        toast.style.display = 'none';
+        g('share-toast').style.display = 'none';
       }, 2500);
     }).catch(function () {
-      window.prompt('Copy this link:', url);
+      window.prompt('Copy this link to share the report:', url);
     });
   });
 
   /* ── Print ── */
   g('btn-print').addEventListener('click', function () { g('report-frame').contentWindow.print(); });
 
-  /* ── Popstate ── */
+  /* ── Popstate (browser back/forward) ── */
   window.addEventListener('popstate', function () {
     var params = new URLSearchParams(window.location.search);
-    var t = params.get('t');
-    if (t) {
-      g('ticker').value = t;
+    var id = params.get('id');
+    if (id && /^[A-Za-z0-9_-]{6,16}$/.test(id)) {
+      loadReport(id);
     } else {
       g('report-frame').srcdoc = '';
       showScreen('landing');
     }
   });
 
-  /* ── Auto-load from URL param ── */
+  /* ── Auto-load shared report from URL ── */
   var params = new URLSearchParams(window.location.search);
-  var autoTicker = params.get('t');
-  if (autoTicker) {
-    g('ticker').value = autoTicker;
-    // Don't auto-generate — let them click. Just pre-fill.
+  var sharedId = params.get('id');
+  if (sharedId && /^[A-Za-z0-9_-]{6,16}$/.test(sharedId)) {
+    loadReport(sharedId);
   }
 
 })();
