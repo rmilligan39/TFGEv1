@@ -1,0 +1,510 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TFG Equity Research</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --navy: #1a1a2e;
+  --gold: #AD9551;
+  --gold-light: #c4ad6e;
+  --bg: #fafaf8;
+  --text: #222;
+  --gray: #888;
+  --border: #ddd;
+}
+
+body {
+  font-family: 'Georgia', 'Times New Roman', serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+}
+
+/* ── Screens ── */
+.screen { display: none; }
+.screen.active { display: flex; }
+
+/* ── Landing ── */
+#landing {
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 40px 24px;
+}
+.brand {
+  text-align: center;
+  margin-bottom: 48px;
+}
+.brand h1 {
+  font-size: 32px;
+  font-weight: 700;
+  color: var(--navy);
+  letter-spacing: -0.5px;
+  margin-bottom: 6px;
+}
+.brand h1 span { color: var(--gold); }
+.brand .subtitle {
+  font-size: 15px;
+  color: var(--gray);
+  font-style: italic;
+  letter-spacing: 0.3px;
+}
+.brand .data-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 14px;
+  padding: 6px 14px;
+  background: #f0eee6;
+  border: 1px solid #d8d4c4;
+  border-radius: 4px;
+  font-family: Arial, sans-serif;
+  font-size: 11px;
+  color: #666;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+}
+.brand .data-badge .dot {
+  width: 7px; height: 7px;
+  background: #22c55e;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+/* ── Input area ── */
+.input-area {
+  width: 100%;
+  max-width: 520px;
+  text-align: center;
+}
+.input-area label {
+  display: block;
+  font-size: 14px;
+  font-family: Arial, sans-serif;
+  color: #555;
+  margin-bottom: 10px;
+  text-align: left;
+}
+.input-row {
+  display: flex;
+  gap: 10px;
+}
+.input-row input {
+  flex: 1;
+  font-family: 'Courier New', monospace;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  padding: 14px 18px;
+  border: 2px solid var(--border);
+  border-radius: 4px;
+  background: white;
+  color: var(--navy);
+  outline: none;
+  transition: border-color 0.2s;
+}
+.input-row input:focus { border-color: var(--gold); }
+.input-row input::placeholder {
+  font-family: Georgia, serif;
+  font-weight: 400;
+  font-size: 16px;
+  letter-spacing: 0;
+  text-transform: none;
+  color: #bbb;
+}
+.btn-generate {
+  font-family: Arial, sans-serif;
+  font-size: 15px;
+  font-weight: 600;
+  padding: 14px 28px;
+  background: var(--navy);
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.2s;
+}
+.btn-generate:hover { background: #2a2a4e; }
+.btn-generate:disabled { background: #999; cursor: not-allowed; }
+.btn-generate .arrow { margin-left: 6px; }
+
+/* ── Error ── */
+.error-msg {
+  display: none;
+  margin-top: 14px;
+  padding: 10px 16px;
+  background: #fff0f0;
+  border: 1px solid #e8c0c0;
+  border-radius: 4px;
+  color: #a33;
+  font-family: Arial, sans-serif;
+  font-size: 13px;
+  text-align: left;
+}
+
+/* ── Loading ── */
+#loading {
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 40px 24px;
+  text-align: center;
+}
+.loading-ticker {
+  font-family: 'Courier New', monospace;
+  font-size: 36px;
+  font-weight: 700;
+  color: var(--navy);
+  margin-bottom: 8px;
+}
+.loading-status {
+  font-size: 14px;
+  font-family: Arial, sans-serif;
+  color: var(--gray);
+  margin-bottom: 32px;
+}
+.pipeline-steps {
+  width: 100%;
+  max-width: 400px;
+  text-align: left;
+}
+.step {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 0;
+  font-family: Arial, sans-serif;
+  font-size: 13px;
+  color: #aaa;
+  border-bottom: 1px solid #eee;
+  transition: color 0.3s;
+}
+.step.active { color: var(--navy); font-weight: 600; }
+.step.done { color: #22c55e; }
+.step .icon {
+  width: 20px;
+  text-align: center;
+  flex-shrink: 0;
+  font-size: 14px;
+}
+.step.active .icon::after { content: '\25B6'; color: var(--gold); }
+.step.done .icon::after { content: '\2713'; color: #22c55e; }
+.step:not(.active):not(.done) .icon::after { content: '\25CB'; color: #ccc; }
+
+/* ── Report screen ── */
+#report-screen {
+  flex-direction: column;
+  height: 100vh;
+}
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 20px;
+  background: var(--navy);
+  color: white;
+  font-family: Arial, sans-serif;
+  font-size: 13px;
+  flex-shrink: 0;
+}
+.toolbar .tb-company {
+  font-weight: 700;
+  font-size: 15px;
+  letter-spacing: 0.5px;
+}
+.toolbar .tb-source {
+  font-size: 11px;
+  color: var(--gold-light);
+  margin-left: 4px;
+}
+.toolbar .spacer { flex: 1; }
+.tb-btn {
+  font-family: Arial, sans-serif;
+  font-size: 12px;
+  padding: 6px 14px;
+  border: 1px solid rgba(255,255,255,0.25);
+  border-radius: 3px;
+  background: transparent;
+  color: white;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.tb-btn:hover { background: rgba(255,255,255,0.1); border-color: rgba(255,255,255,0.5); }
+.tb-btn.gold { background: var(--gold); border-color: var(--gold); color: var(--navy); font-weight: 600; }
+.tb-btn.gold:hover { background: var(--gold-light); }
+.tb-btn.copied { background: #22c55e; border-color: #22c55e; }
+
+#report-frame {
+  flex: 1;
+  border: none;
+  width: 100%;
+  background: white;
+}
+
+/* ── Toast ── */
+#share-toast {
+  display: none;
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--navy);
+  color: white;
+  font-family: Arial, sans-serif;
+  font-size: 13px;
+  padding: 10px 24px;
+  border-radius: 6px;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.25);
+  z-index: 999;
+}
+
+/* ── Footer ── */
+.landing-footer {
+  margin-top: 48px;
+  font-family: Arial, sans-serif;
+  font-size: 11px;
+  color: #bbb;
+  text-align: center;
+  line-height: 1.7;
+}
+.landing-footer a { color: #999; }
+</style>
+</head>
+<body>
+
+<!-- ══════════ LANDING ══════════ -->
+<div id="landing" class="screen active">
+  <div class="brand">
+    <h1>TFG <span>Equity Research</span></h1>
+    <div class="subtitle">Institutional-Grade Analysis &middot; The Fedeli Group</div>
+    <div class="data-badge">
+      <span class="dot"></span>
+      Powered by Polygon.io &amp; Claude
+    </div>
+  </div>
+
+  <div class="input-area">
+    <label for="ticker">Enter a ticker symbol to generate a full research report</label>
+    <div class="input-row">
+      <input type="text" id="ticker" placeholder="e.g. AAPL, MSFT, SPGI" autocomplete="off" spellcheck="false">
+      <button id="btn-generate" class="btn-generate">Generate Report <span class="arrow">&#8594;</span></button>
+    </div>
+    <div id="error-msg" class="error-msg"></div>
+  </div>
+
+  <div class="landing-footer">
+    Financial data from <a href="https://polygon.io" target="_blank" rel="noopener">Polygon.io</a>.
+    Reports generated by Claude (Anthropic).<br>
+    For internal use only. Not investment advice.
+  </div>
+</div>
+
+<!-- ══════════ LOADING ══════════ -->
+<div id="loading" class="screen">
+  <div class="loading-ticker" id="loading-name"></div>
+  <div class="loading-status" id="loading-status">Initializing data pipeline&hellip;</div>
+  <div class="pipeline-steps">
+    <div class="step" data-step="1"><span class="icon"></span>Resolving ticker via Polygon.io</div>
+    <div class="step" data-step="2"><span class="icon"></span>Fetching annual &amp; quarterly financials</div>
+    <div class="step" data-step="3"><span class="icon"></span>Loading price history &amp; computing ranges</div>
+    <div class="step" data-step="4"><span class="icon"></span>Pulling S&amp;P 500 data for relative valuation</div>
+    <div class="step" data-step="5"><span class="icon"></span>Computing derived metrics &amp; ratios</div>
+    <div class="step" data-step="6"><span class="icon"></span>Generating report via Claude</div>
+    <div class="step" data-step="7"><span class="icon"></span>Rendering HTML with Chart.js</div>
+  </div>
+</div>
+
+<!-- ══════════ REPORT ══════════ -->
+<div id="report-screen" class="screen">
+  <div class="toolbar">
+    <button id="btn-back" class="tb-btn">&larr; New Report</button>
+    <span class="tb-company" id="tb-company"></span>
+    <span class="tb-source">via Polygon.io</span>
+    <span class="spacer"></span>
+    <button id="btn-copy" class="tb-btn gold">&#128279; Copy Link</button>
+    <button id="btn-print" class="tb-btn">Print</button>
+  </div>
+  <iframe id="report-frame" sandbox="allow-scripts allow-same-origin"></iframe>
+</div>
+
+<div id="share-toast">Link copied to clipboard</div>
+
+<script>
+(function () {
+  'use strict';
+
+  function g(id) { return document.getElementById(id); }
+
+  /* ── Screen management ── */
+  function showScreen(id) {
+    document.querySelectorAll('.screen').forEach(function (s) { s.classList.remove('active'); });
+    g(id).classList.add('active');
+  }
+
+  /* ── Error display ── */
+  function showError(msg) {
+    var el = g('error-msg');
+    el.textContent = msg;
+    el.style.display = 'block';
+  }
+  function clearError() { g('error-msg').style.display = 'none'; }
+
+  /* ── Pipeline step animation ── */
+  var stepTimer = null;
+  var currentStep = 0;
+
+  function startSteps() {
+    currentStep = 0;
+    var steps = document.querySelectorAll('.step');
+    steps.forEach(function (s) { s.classList.remove('active', 'done'); });
+
+    var delays = [0, 2000, 4500, 7000, 9500, 13000, 60000];
+    // Steps 1-5 are data fetching (~15s), step 6 is Claude (~30-90s), step 7 on completion
+
+    function advance() {
+      if (currentStep >= steps.length) return;
+
+      // Mark previous as done
+      if (currentStep > 0) steps[currentStep - 1].classList.remove('active');
+      if (currentStep > 0) steps[currentStep - 1].classList.add('done');
+
+      steps[currentStep].classList.add('active');
+      currentStep++;
+
+      if (currentStep < steps.length) {
+        var nextDelay = (delays[currentStep] || 5000) - (delays[currentStep - 1] || 0);
+        stepTimer = setTimeout(advance, nextDelay);
+      }
+    }
+    advance();
+  }
+
+  function stopSteps() {
+    clearTimeout(stepTimer);
+    var steps = document.querySelectorAll('.step');
+    steps.forEach(function (s) { s.classList.remove('active'); s.classList.add('done'); });
+  }
+
+  function resetSteps() {
+    clearTimeout(stepTimer);
+    currentStep = 0;
+    document.querySelectorAll('.step').forEach(function (s) { s.classList.remove('active', 'done'); });
+  }
+
+  /* ── API call ── */
+  async function callAPI(query) {
+    var res = await fetch('/api/research', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query: query })
+    });
+    var data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Request failed (' + res.status + ')');
+    return data;
+  }
+
+  /* ── Generate handler ── */
+  g('btn-generate').addEventListener('click', async function () {
+    var query = g('ticker').value.trim();
+    var btn = g('btn-generate');
+    clearError();
+    if (!query) return showError('Please enter a ticker symbol.');
+
+    btn.disabled = true;
+    btn.innerHTML = 'Generating&hellip; please wait';
+    g('loading-name').textContent = query.toUpperCase();
+    g('loading-status').textContent = 'Fetching data from Polygon.io\u2026';
+    showScreen('loading');
+    startSteps();
+
+    try {
+      var result = await callAPI(query);
+      stopSteps();
+      g('loading-status').textContent = 'Rendering report\u2026';
+      g('tb-company').textContent = (result.companyName || query.toUpperCase()) + ' (' + (result.ticker || query.toUpperCase()) + ')';
+      g('report-frame').srcdoc = result.html;
+
+      // Update URL for sharing
+      var reportId = query.toUpperCase() + '-' + Date.now().toString(36);
+      var newUrl = window.location.pathname + '?t=' + encodeURIComponent(query.toUpperCase());
+      history.pushState({ ticker: query }, '', newUrl);
+
+      setTimeout(function () { showScreen('report-screen'); }, 350);
+    } catch (err) {
+      resetSteps();
+      btn.disabled = false;
+      btn.innerHTML = 'Generate Report <span class="arrow">&#8594;</span>';
+      showScreen('landing');
+      setTimeout(function () { showError(err.message); }, 150);
+    }
+  });
+
+  /* ── Enter key ── */
+  g('ticker').addEventListener('keydown', function (e) { if (e.key === 'Enter') g('btn-generate').click(); });
+
+  /* ── Back button ── */
+  g('btn-back').addEventListener('click', function () {
+    g('report-frame').srcdoc = '';
+    resetSteps();
+    var btn = g('btn-generate');
+    btn.disabled = false;
+    btn.innerHTML = 'Generate Report <span class="arrow">&#8594;</span>';
+    history.pushState({}, '', window.location.pathname);
+    showScreen('landing');
+  });
+
+  /* ── Copy link ── */
+  g('btn-copy').addEventListener('click', function () {
+    var btn = g('btn-copy');
+    var url = window.location.href;
+    var original = btn.innerHTML;
+    navigator.clipboard.writeText(url).then(function () {
+      btn.innerHTML = '&#10003; Copied';
+      btn.classList.add('copied');
+      var toast = g('share-toast');
+      toast.style.display = 'block';
+      setTimeout(function () {
+        btn.innerHTML = original;
+        btn.classList.remove('copied');
+        toast.style.display = 'none';
+      }, 2500);
+    }).catch(function () {
+      window.prompt('Copy this link:', url);
+    });
+  });
+
+  /* ── Print ── */
+  g('btn-print').addEventListener('click', function () { g('report-frame').contentWindow.print(); });
+
+  /* ── Popstate ── */
+  window.addEventListener('popstate', function () {
+    var params = new URLSearchParams(window.location.search);
+    var t = params.get('t');
+    if (t) {
+      g('ticker').value = t;
+    } else {
+      g('report-frame').srcdoc = '';
+      showScreen('landing');
+    }
+  });
+
+  /* ── Auto-load from URL param ── */
+  var params = new URLSearchParams(window.location.search);
+  var autoTicker = params.get('t');
+  if (autoTicker) {
+    g('ticker').value = autoTicker;
+    // Don't auto-generate — let them click. Just pre-fill.
+  }
+
+})();
+</script>
+</body>
+</html>
