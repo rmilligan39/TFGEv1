@@ -6,6 +6,7 @@ const crypto = require('crypto');
    ═══════════════════════════════════════════════════════════════════════════ */
 
 const POLYGON_KEY  = process.env.POLYGON_API_KEY  || '';
+const FMP_KEY      = process.env.FMP_API_KEY       || '';
 const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY || '';
 
 function polygonGet(path) {
@@ -118,6 +119,191 @@ async function fetchTickerData(ticker) {
   } catch (e) { /* fallback to last daily bar */ }
 
   return { co, filings, quarters, monthlyBars, dailyBars, spyMonthly, divs, snapshot, ticker: T };
+}
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   FMP (FINANCIAL MODELING PREP) — FALLBACK DATA SOURCE
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+function fmpGet(path) {
+  const sep = path.includes('?') ? '&' : '?';
+  const url = `https://financialmodelingprep.com${path}${sep}apikey=${FMP_KEY}`;
+  return new Promise((resolve, reject) => {
+    https.get(url, { headers: { 'User-Agent': 'TFG-Research/3.0' } }, (res) => {
+      let body = '';
+      res.on('data', d => body += d);
+      res.on('end', () => {
+        try { resolve(JSON.parse(body)); }
+        catch (e) { reject(new Error(`FMP parse error on ${path}`)); }
+      });
+      res.on('error', reject);
+    }).on('error', reject);
+  });
+}
+
+async function fetchTickerDataFMP(ticker) {
+  const T = ticker.toUpperCase();
+
+  // 1. Company profile (price, marketCap, beta, sector, etc.)
+  const profileArr = await fmpGet(`/api/v3/profile/${T}`);
+  const profile = (Array.isArray(profileArr) ? profileArr[0] : profileArr) || {};
+
+  if (!profile.companyName && !profile.symbol) {
+    return { profile: {}, ticker: T, found: false };
+  }
+
+  // 2. Annual income statements (last 6 years)
+  const incomeStmts = await fmpGet(`/api/v3/income-statement/${T}?limit=6`);
+
+  // 3. Annual balance sheets
+  const balanceSheets = await fmpGet(`/api/v3/balance-sheet-statement/${T}?limit=6`);
+
+  // 4. Annual cash flow statements
+  const cashFlows = await fmpGet(`/api/v3/cash-flow-statement/${T}?limit=6`);
+
+  // 5. Quarterly income statements (for TTM)
+  const qIncome = await fmpGet(`/api/v3/income-statement/${T}?period=quarter&limit=8`);
+
+  // 6. Quarterly cash flows (for TTM)
+  const qCashFlow = await fmpGet(`/api/v3/cash-flow-statement/${T}?period=quarter&limit=8`);
+
+  // 7. Historical daily prices (6 years)
+  const priceHistory = await fmpGet(`/api/v3/historical-price-full/${T}?from=${yearsAgo(6)}&to=${todayStr()}`);
+  const dailyPrices = (priceHistory.historical || []).reverse(); // oldest first
+
+  // 8. S&P 500 history (for relative valuation)
+  const spHistory = await fmpGet(`/api/v3/historical-price-full/%5EGSPC?from=${yearsAgo(6)}&to=${todayStr()}`);
+  const spDaily = (spHistory.historical || []).reverse();
+
+  // 9. Dividend history
+  const divHistory = await fmpGet(`/api/v3/historical-price-full/stock_dividend/${T}?from=${yearsAgo(6)}&to=${todayStr()}`);
+  const divs = (divHistory.historical || []);
+
+  return { profile, incomeStmts, balanceSheets, cashFlows, qIncome, qCashFlow, dailyPrices, spDaily, divs, ticker: T, found: true };
+}
+
+function computeMetricsFMP(raw) {
+  const { profile, incomeStmts, balanceSheets, cashFlows, qIncome, qCashFlow, dailyPrices, spDaily, divs, ticker } = raw;
+
+  const recentPrice = profile.price || (dailyPrices.length ? dailyPrices[dailyPrices.length - 1].close : null);
+  const companyName = profile.companyName || ticker;
+  const marketCap = profile.mktCap || null;
+  const sicDesc = profile.sector ? `${profile.sector} — ${profile.industry || ''}` : '';
+  const exchange = profile.exchangeShortName || profile.exchange || '';
+  const sharesOut = profile.sharesOutstanding || (incomeStmts[0]?.weightedAverageShsOut) || null;
+  const homepage = profile.website || '';
+  const beta = profile.beta || null;
+
+  // Align and reverse annual statements (FMP returns newest first)
+  const incArr = Array.isArray(incomeStmts) ? [...incomeStmts].reverse() : [];
+  const bsArr = Array.isArray(balanceSheets) ? [...balanceSheets].reverse() : [];
+  const cfArr = Array.isArray(cashFlows) ? [...cashFlows].reverse() : [];
+
+  // Build annuals by matching on calendar year
+  const annuals = incArr.map((inc, i) => {
+    const bs = bsArr[i] || {};
+    const cf = cfArr[i] || {};
+    const year = (inc.calendarYear || inc.date?.slice(0, 4) || '');
+
+    const revenue = inc.revenue || null;
+    const netIncome = inc.netIncome || null;
+    const opIncome = inc.operatingIncome || null;
+    const eps = inc.eps || (netIncome && sharesOut ? netIncome / sharesOut : null);
+    const ebitda = inc.ebitda || (opIncome != null ? opIncome + Math.abs(inc.depreciationAndAmortization || 0) : null);
+
+    const totalEquity = bs.totalStockholdersEquity || bs.totalEquity || null;
+    const ltDebt = bs.longTermDebt || null;
+    const currentAssets = bs.totalCurrentAssets || null;
+    const currentLiab = bs.totalCurrentLiabilities || null;
+    const workingCap = (currentAssets && currentLiab) ? currentAssets - currentLiab : null;
+    const bookVal = totalEquity && sharesOut ? totalEquity / sharesOut : null;
+
+    const opCF = cf.operatingCashFlow || null;
+    const capex = cf.capitalExpenditure ? Math.abs(cf.capitalExpenditure) : null;
+    const fcf = cf.freeCashFlow || (opCF != null ? opCF - (capex || 0) : null);
+    const shares = inc.weightedAverageShsOut || sharesOut;
+
+    return {
+      year, revenue, netIncome, opIncome, ebitda, eps, shares,
+      totalEquity, ltDebt, currentAssets, currentLiab, workingCap, bookVal,
+      opCF, capex, fcf,
+      ebitdaMargin: revenue && ebitda ? ebitda / revenue : null,
+      opMargin: revenue && opIncome ? opIncome / revenue : null,
+      netMargin: revenue && netIncome ? netIncome / revenue : null,
+      roe: totalEquity && netIncome ? netIncome / totalEquity : null,
+      rotc: (totalEquity && ltDebt && netIncome) ? netIncome / (totalEquity + (ltDebt || 0)) : null,
+    };
+  });
+
+  // TTM from quarterly
+  const ttmQI = Array.isArray(qIncome) ? qIncome.slice(0, 4) : [];
+  const ttmQC = Array.isArray(qCashFlow) ? qCashFlow.slice(0, 4) : [];
+  let ttmRevenue = 0, ttmNetIncome = 0, ttmEBITDA = 0, ttmFCF = 0;
+  ttmQI.forEach((q, i) => {
+    ttmRevenue += (q.revenue || 0);
+    ttmNetIncome += (q.netIncome || 0);
+    ttmEBITDA += (q.ebitda || (q.operatingIncome || 0) + Math.abs(q.depreciationAndAmortization || 0));
+    const cf = ttmQC[i] || {};
+    ttmFCF += (cf.freeCashFlow || ((cf.operatingCashFlow || 0) - Math.abs(cf.capitalExpenditure || 0)));
+  });
+
+  const ttmEPS = sharesOut && ttmNetIncome ? ttmNetIncome / sharesOut : null;
+
+  // Valuation ratios
+  const trailingPE = recentPrice && ttmEPS && ttmEPS > 0 ? recentPrice / ttmEPS : null;
+  const lastAnnual = annuals.length > 0 ? annuals[annuals.length - 1] : {};
+  const ev = marketCap ? marketCap + (lastAnnual.ltDebt || 0) - (lastAnnual.currentAssets || 0) * 0.3 : null;
+  const evEbitdaTTM = ev && ttmEBITDA > 0 ? ev / ttmEBITDA : null;
+  const priceFCF = marketCap && ttmFCF > 0 ? marketCap / ttmFCF : null;
+
+  // Price ranges from daily data
+  const priceRanges = {};
+  dailyPrices.forEach(d => {
+    const yr = d.date?.slice(0, 4);
+    if (!yr) return;
+    if (!priceRanges[yr]) priceRanges[yr] = { high: -Infinity, low: Infinity };
+    if (d.high > priceRanges[yr].high) priceRanges[yr].high = d.high;
+    if (d.low < priceRanges[yr].low) priceRanges[yr].low = d.low;
+  });
+
+  // Monthly closing prices (sample one per month from daily)
+  const monthlyMap = {};
+  dailyPrices.forEach(d => {
+    const ym = d.date?.slice(0, 7);
+    if (ym) monthlyMap[ym] = d.close; // last day of each month wins
+  });
+  const monthlyPrices = Object.entries(monthlyMap).sort().map(([ym, close]) => {
+    const [y, m] = ym.split('-');
+    const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    return { date: ym, label: months[parseInt(m) - 1] + '-' + y.slice(2), close };
+  });
+
+  // SPY monthly
+  const spyMonthMap = {};
+  spDaily.forEach(d => {
+    const ym = d.date?.slice(0, 7);
+    if (ym) spyMonthMap[ym] = d.close;
+  });
+  const spyPrices = Object.entries(spyMonthMap).sort().map(([ym, close]) => ({ date: ym, close }));
+
+  // Dividends
+  const annualDivs = {};
+  divs.forEach(d => {
+    const yr = (d.date || d.paymentDate || '').slice(0, 4);
+    if (yr) annualDivs[yr] = (annualDivs[yr] || 0) + (d.dividend || d.adjDividend || 0);
+  });
+  const recentDivs = divs.slice(0, 4);
+  const ttmDiv = recentDivs.reduce((s, d) => s + (d.dividend || d.adjDividend || 0), 0);
+  const divYield = recentPrice && ttmDiv ? ttmDiv / recentPrice : null;
+
+  return {
+    ticker, companyName, exchange, sicDesc, marketCap, sharesOut, homepage, beta,
+    recentPrice, trailingPE, evEbitdaTTM, priceFCF, divYield,
+    ttmRevenue, ttmNetIncome, ttmEBITDA, ttmFCF, ttmEPS, ttmDiv, ev,
+    annuals, priceRanges, monthlyPrices, spyPrices, annualDivs,
+    dataSource: 'financialmodelingprep.com',
+  };
 }
 
 
@@ -241,6 +427,7 @@ function computeMetrics(raw) {
     recentPrice, trailingPE, evEbitdaTTM, priceFCF, divYield,
     ttmRevenue, ttmNetIncome, ttmEBITDA, ttmFCF, ttmEPS, ttmDiv, ev,
     annuals, priceRanges, monthlyPrices, spyPrices, annualDivs,
+    dataSource: 'Polygon.io',
   };
 }
 
@@ -305,7 +492,7 @@ The HTML must contain:
 - Flag all estimates with (E) in column headers only, not in individual cells.
 
 ══════════════════════════════════════════
-PRE-COMPUTED DATA FROM POLYGON.IO — USE ONLY THIS DATA
+PRE-COMPUTED DATA FROM ${(m.dataSource || 'polygon.io').toUpperCase()} — USE ONLY THIS DATA
 ══════════════════════════════════════════
 
 Do NOT fabricate financial numbers. Use the data below. For forward estimates, project from historical trends and mark with (E).
@@ -431,7 +618,7 @@ SECTION 3 — HISTORICAL VALUATION CHARTS
 Three side-by-side Chart.js panels below data block, above narrative.
 
 Section header: "Historical Absolute & Relative Valuation — Forward P/E | Price / FCF | Forward EV/EBITDA  vs. S&P 500"
-Source line: "Source: Polygon.io, Company Filings, TFG Research | As of ${today}"
+Source line: "Source: ${m.dataSource || 'Polygon.io'}, Company Filings, TFG Research | As of ${today}"
 
 Three panels in a CSS grid (1fr 1fr 1fr):
 Panel 1: Forward P/E vs S&P 500
@@ -466,7 +653,7 @@ Full-width div: background #1a1a2e, color white, padding 24px 28px, margin-top 4
 ══════════════════════════════════════════
 FOOTER
 ══════════════════════════════════════════
-Small footer div: "Financial data sourced from Polygon.io. Report generated ${today}. For internal use only — not investment advice."
+Small footer div: "Financial data sourced from ${m.dataSource || 'Polygon.io'}. Report generated ${today}. For internal use only — not investment advice."
 Style: font-size 11px, color #999, margin-top 32px, border-top 1px solid #eee, padding-top 12px.
 `;
 }
@@ -485,25 +672,71 @@ module.exports = async function handler(req, res) {
 
   const { query } = req.body || {};
   if (!query) return res.status(400).json({ error: 'Missing ticker in request body.' });
-  if (!POLYGON_KEY) return res.status(500).json({ error: 'POLYGON_API_KEY not configured in Vercel environment variables.' });
   if (!ANTHROPIC_KEY) return res.status(500).json({ error: 'ANTHROPIC_API_KEY not configured in Vercel environment variables.' });
 
   const ticker = query.trim().toUpperCase();
+  // Detect likely non-US tickers: contains a dot (CSU.TO, SHOP.TO, etc.)
+  const likelyNonUS = ticker.includes('.');
+
+  let metrics = null;
+  let usedSource = 'polygon.io';
 
   try {
-    // Phase 1: Fetch from Polygon
-    console.log(`[${ticker}] Fetching Polygon.io data...`);
-    const rawData = await fetchTickerData(ticker);
-    if (!rawData.co.name) {
-      return res.status(404).json({ error: `Ticker "${ticker}" not found in Polygon.io. Check the symbol and try again.` });
+    // ── Strategy: Polygon first for US tickers, FMP first for non-US ────
+    if (!likelyNonUS && POLYGON_KEY) {
+      // Try Polygon for US tickers
+      try {
+        console.log(`[${ticker}] Trying Polygon.io...`);
+        const rawData = await fetchTickerData(ticker);
+        if (rawData.co.name) {
+          console.log(`[${ticker}] Polygon.io found: ${rawData.co.name}`);
+          metrics = computeMetrics(rawData);
+          metrics.dataSource = 'Polygon.io';
+          usedSource = 'polygon.io';
+        }
+      } catch (polyErr) {
+        console.log(`[${ticker}] Polygon.io failed: ${polyErr.message}`);
+      }
     }
 
-    // Phase 2: Compute metrics
-    console.log(`[${ticker}] Computing metrics...`);
-    const metrics = computeMetrics(rawData);
+    // Fallback to FMP (or primary for non-US)
+    if (!metrics && FMP_KEY) {
+      try {
+        console.log(`[${ticker}] Trying Financial Modeling Prep...`);
+        const fmpData = await fetchTickerDataFMP(ticker);
+        if (fmpData.found) {
+          console.log(`[${ticker}] FMP found: ${fmpData.profile.companyName}`);
+          metrics = computeMetricsFMP(fmpData);
+          usedSource = 'financialmodelingprep.com';
+        }
+      } catch (fmpErr) {
+        console.log(`[${ticker}] FMP failed: ${fmpErr.message}`);
+      }
+    }
 
-    // Phase 3: Build prompt and call Claude
-    console.log(`[${ticker}] Calling Claude for report generation...`);
+    // If Polygon failed for US ticker and FMP wasn't tried yet, try FMP as last resort
+    if (!metrics && !likelyNonUS && FMP_KEY) {
+      try {
+        console.log(`[${ticker}] Last resort — trying FMP for US ticker...`);
+        const fmpData = await fetchTickerDataFMP(ticker);
+        if (fmpData.found) {
+          metrics = computeMetricsFMP(fmpData);
+          usedSource = 'financialmodelingprep.com';
+        }
+      } catch (e) {
+        console.log(`[${ticker}] FMP last resort also failed: ${e.message}`);
+      }
+    }
+
+    if (!metrics) {
+      const sources = [POLYGON_KEY ? 'Polygon.io' : null, FMP_KEY ? 'FMP' : null].filter(Boolean).join(' and ');
+      return res.status(404).json({
+        error: `Ticker "${ticker}" not found in ${sources || 'any configured data source'}. Check the symbol and try again. For Canadian stocks, use the .TO suffix (e.g., CSU.TO).`
+      });
+    }
+
+    // ── Build prompt and call Claude ─────────────────────────────────
+    console.log(`[${ticker}] Generating report via Claude (data from ${usedSource})...`);
     const prompt = buildPrompt(metrics);
     const payload = JSON.stringify({
       model: 'claude-sonnet-4-6',
@@ -542,15 +775,15 @@ module.exports = async function handler(req, res) {
       return res.status(500).json({ error: 'Claude returned an empty response.' });
     }
 
-    // Phase 4: Save to KV for sharing
+    // ── Save to KV for sharing ──────────────────────────────────────
     const id = generateId();
     const saved = await kvSet('report:' + id, html);
-    console.log(`[${ticker}] Report saved to KV: ${saved ? id : 'SKIPPED (KV not configured)'}`);
+    console.log(`[${ticker}] Report saved to KV: ${saved ? id : 'SKIPPED'}`);
 
     return res.status(200).json({
       html,
       id: saved ? id : null,
-      dataSource: 'polygon.io',
+      dataSource: usedSource,
       ticker: metrics.ticker,
       companyName: metrics.companyName
     });
