@@ -134,8 +134,19 @@ function fmpGet(path) {
       let body = '';
       res.on('data', d => body += d);
       res.on('end', () => {
-        try { resolve(JSON.parse(body)); }
-        catch (e) { reject(new Error(`FMP parse error on ${path}`)); }
+        try {
+          const parsed = JSON.parse(body);
+          // FMP returns {"Error Message": "..."} on errors
+          if (parsed && parsed['Error Message']) {
+            console.log(`[FMP] Error on ${path}: ${parsed['Error Message']}`);
+            resolve([]); // return empty array instead of rejecting — let caller handle
+          } else {
+            resolve(parsed);
+          }
+        } catch (e) {
+          console.log(`[FMP] Parse error on ${path}: ${body.slice(0, 200)}`);
+          reject(new Error(`FMP parse error on ${path}`));
+        }
       });
       res.on('error', reject);
     }).on('error', reject);
@@ -143,13 +154,43 @@ function fmpGet(path) {
 }
 
 async function fetchTickerDataFMP(ticker) {
-  const T = ticker.toUpperCase();
+  let T = ticker.toUpperCase();
 
-  // 1. Company profile (price, marketCap, beta, sector, etc.)
+  // First try a search to resolve the symbol if direct profile fails
   const profileArr = await fmpGet(`/api/v3/profile/${T}`);
-  const profile = (Array.isArray(profileArr) ? profileArr[0] : profileArr) || {};
+  let profile = (Array.isArray(profileArr) ? profileArr[0] : profileArr) || {};
+
+  // If direct lookup failed, try FMP's search endpoint to find the right symbol
+  if (!profile.companyName && !profile.symbol) {
+    console.log(`[${T}] FMP direct profile failed, trying search...`);
+    // Strip .TO suffix and search with exchange filter
+    const searchTerm = T.replace(/\.(TO|V|CN|NE)$/i, '');
+    const searchRes = await fmpGet(`/api/v3/search?query=${encodeURIComponent(searchTerm)}&limit=5&exchange=TSX`);
+    if (Array.isArray(searchRes) && searchRes.length > 0) {
+      const match = searchRes[0];
+      console.log(`[${T}] FMP search found: ${match.symbol} — ${match.name}`);
+      T = match.symbol;
+      // Re-fetch profile with the resolved symbol
+      const retryProfile = await fmpGet(`/api/v3/profile/${T}`);
+      profile = (Array.isArray(retryProfile) ? retryProfile[0] : retryProfile) || {};
+    }
+  }
+
+  // Also try without suffix if still not found (FMP sometimes uses bare symbols for TSX)
+  if (!profile.companyName && !profile.symbol && T.includes('.')) {
+    const bare = T.split('.')[0];
+    console.log(`[${T}] Trying bare symbol: ${bare}`);
+    const bareProfile = await fmpGet(`/api/v3/profile/${bare}`);
+    const bp = (Array.isArray(bareProfile) ? bareProfile[0] : bareProfile) || {};
+    if (bp.companyName || bp.symbol) {
+      T = bare;
+      profile = bp;
+      console.log(`[${T}] FMP found with bare symbol: ${bp.companyName}`);
+    }
+  }
 
   if (!profile.companyName && !profile.symbol) {
+    console.log(`[${T}] FMP: no profile found after all attempts. Raw response: ${JSON.stringify(profileArr).slice(0, 200)}`);
     return { profile: {}, ticker: T, found: false };
   }
 
