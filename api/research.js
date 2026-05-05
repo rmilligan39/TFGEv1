@@ -136,10 +136,9 @@ function fmpGet(path) {
       res.on('end', () => {
         try {
           const parsed = JSON.parse(body);
-          // FMP returns {"Error Message": "..."} on errors
           if (parsed && parsed['Error Message']) {
             console.log(`[FMP] Error on ${path}: ${parsed['Error Message']}`);
-            resolve([]); // return empty array instead of rejecting — let caller handle
+            resolve([]);
           } else {
             resolve(parsed);
           }
@@ -156,70 +155,73 @@ function fmpGet(path) {
 async function fetchTickerDataFMP(ticker) {
   let T = ticker.toUpperCase();
 
-  // First try a search to resolve the symbol if direct profile fails
-  const profileArr = await fmpGet(`/api/v3/profile/${T}`);
+  // 1. Try direct profile lookup using /stable/ endpoint
+  let profileArr = await fmpGet(`/stable/profile?symbol=${encodeURIComponent(T)}`);
   let profile = (Array.isArray(profileArr) ? profileArr[0] : profileArr) || {};
 
-  // If direct lookup failed, try FMP's search endpoint to find the right symbol
+  // If direct lookup failed, try search to resolve the symbol
   if (!profile.companyName && !profile.symbol) {
     console.log(`[${T}] FMP direct profile failed, trying search...`);
-    // Strip .TO suffix and search with exchange filter
-    const searchTerm = T.replace(/\.(TO|V|CN|NE)$/i, '');
-    const searchRes = await fmpGet(`/api/v3/search?query=${encodeURIComponent(searchTerm)}&limit=5&exchange=TSX`);
+    const searchRes = await fmpGet(`/stable/search-symbol?query=${encodeURIComponent(T)}`);
     if (Array.isArray(searchRes) && searchRes.length > 0) {
       const match = searchRes[0];
       console.log(`[${T}] FMP search found: ${match.symbol} — ${match.name}`);
       T = match.symbol;
-      // Re-fetch profile with the resolved symbol
-      const retryProfile = await fmpGet(`/api/v3/profile/${T}`);
+      const retryProfile = await fmpGet(`/stable/profile?symbol=${encodeURIComponent(T)}`);
       profile = (Array.isArray(retryProfile) ? retryProfile[0] : retryProfile) || {};
     }
   }
 
-  // Also try without suffix if still not found (FMP sometimes uses bare symbols for TSX)
+  // Also try without suffix if still not found
   if (!profile.companyName && !profile.symbol && T.includes('.')) {
     const bare = T.split('.')[0];
     console.log(`[${T}] Trying bare symbol: ${bare}`);
-    const bareProfile = await fmpGet(`/api/v3/profile/${bare}`);
+    const bareProfile = await fmpGet(`/stable/profile?symbol=${encodeURIComponent(bare)}`);
     const bp = (Array.isArray(bareProfile) ? bareProfile[0] : bareProfile) || {};
     if (bp.companyName || bp.symbol) {
       T = bare;
       profile = bp;
-      console.log(`[${T}] FMP found with bare symbol: ${bp.companyName}`);
     }
   }
 
   if (!profile.companyName && !profile.symbol) {
-    console.log(`[${T}] FMP: no profile found after all attempts. Raw response: ${JSON.stringify(profileArr).slice(0, 200)}`);
+    console.log(`[${T}] FMP: no profile found. Raw: ${JSON.stringify(profileArr).slice(0, 300)}`);
     return { profile: {}, ticker: T, found: false };
   }
 
-  // 2. Annual income statements (last 6 years)
-  const incomeStmts = await fmpGet(`/api/v3/income-statement/${T}?limit=6`);
+  console.log(`[${T}] FMP profile found: ${profile.companyName}`);
+
+  // 2. Annual income statements
+  const incomeStmts = await fmpGet(`/stable/income-statement?symbol=${encodeURIComponent(T)}&period=annual&limit=6`);
 
   // 3. Annual balance sheets
-  const balanceSheets = await fmpGet(`/api/v3/balance-sheet-statement/${T}?limit=6`);
+  const balanceSheets = await fmpGet(`/stable/balance-sheet-statement?symbol=${encodeURIComponent(T)}&period=annual&limit=6`);
 
   // 4. Annual cash flow statements
-  const cashFlows = await fmpGet(`/api/v3/cash-flow-statement/${T}?limit=6`);
+  const cashFlows = await fmpGet(`/stable/cash-flow-statement?symbol=${encodeURIComponent(T)}&period=annual&limit=6`);
 
   // 5. Quarterly income statements (for TTM)
-  const qIncome = await fmpGet(`/api/v3/income-statement/${T}?period=quarter&limit=8`);
+  const qIncome = await fmpGet(`/stable/income-statement?symbol=${encodeURIComponent(T)}&period=quarter&limit=8`);
 
   // 6. Quarterly cash flows (for TTM)
-  const qCashFlow = await fmpGet(`/api/v3/cash-flow-statement/${T}?period=quarter&limit=8`);
+  const qCashFlow = await fmpGet(`/stable/cash-flow-statement?symbol=${encodeURIComponent(T)}&period=quarter&limit=8`);
 
   // 7. Historical daily prices (6 years)
-  const priceHistory = await fmpGet(`/api/v3/historical-price-full/${T}?from=${yearsAgo(6)}&to=${todayStr()}`);
-  const dailyPrices = (priceHistory.historical || []).reverse(); // oldest first
+  const priceHistory = await fmpGet(`/stable/historical-price-eod/full?symbol=${encodeURIComponent(T)}&from=${yearsAgo(6)}&to=${todayStr()}`);
+  const dailyPrices = Array.isArray(priceHistory) ? priceHistory.reverse() :
+                      (priceHistory.historical || []).reverse();
 
   // 8. S&P 500 history (for relative valuation)
-  const spHistory = await fmpGet(`/api/v3/historical-price-full/%5EGSPC?from=${yearsAgo(6)}&to=${todayStr()}`);
-  const spDaily = (spHistory.historical || []).reverse();
+  const spHistory = await fmpGet(`/stable/historical-price-eod/full?symbol=%5EGSPC&from=${yearsAgo(6)}&to=${todayStr()}`);
+  const spDaily = Array.isArray(spHistory) ? spHistory.reverse() :
+                  (spHistory.historical || []).reverse();
 
   // 9. Dividend history
-  const divHistory = await fmpGet(`/api/v3/historical-price-full/stock_dividend/${T}?from=${yearsAgo(6)}&to=${todayStr()}`);
-  const divs = (divHistory.historical || []);
+  let divs = [];
+  try {
+    const divHistory = await fmpGet(`/stable/historical-price-eod/dividend?symbol=${encodeURIComponent(T)}&from=${yearsAgo(6)}&to=${todayStr()}`);
+    divs = Array.isArray(divHistory) ? divHistory : (divHistory.historical || []);
+  } catch (e) { console.log(`[${T}] FMP dividend fetch failed: ${e.message}`); }
 
   return { profile, incomeStmts, balanceSheets, cashFlows, qIncome, qCashFlow, dailyPrices, spDaily, divs, ticker: T, found: true };
 }
